@@ -8,3 +8,4 @@ wheels/
 
 # Virtual environments
 .venv
+/home/kjdrag/lrepos/google-genai-media-master-repo/experiments/mcp-genmedia/sample-agents/adk/genmedia_agent/.env
