@@ -4,7 +4,7 @@
 
 ---
 
-## TL;DR
+## TL;DR - WORKING SOLUTION
 
 * **Problem:** We were generating media fine, but **no traces** (or intermittent traces). Logs showed gRPC exporter errors like `name resolver error: produced zero addresses`, and our `.env` had **broken multi‑line OTEL values**.
 * **Root causes:**
@@ -12,19 +12,26 @@
   1. **Default gRPC export** + HTTPS endpoint → connection errors.
   2. **OTEL\_* vars in `.env`*\* overriding our code to gRPC again.
   3. A **newline in the OTLP headers** (`OTEL_EXPORTER_OTLP_TRACES_HEADERS`) broke header parsing.
-* **Fix (Python/ADK):**
+  4. **Missing ADK OpenInference instrumentation** for proper agent tracing.
 
-  * **Remove every `OTEL_*` line from `genmedia_agent/.env`** so the app doesn’t force gRPC.
-  * Add a **`sitecustomize.py`** inside the ADK venv to load `.env`, **build headers from `ARIZE_*`**, and **force HTTP/protobuf** endpoints.
-* **Fix (Go MCPs):**
+* **IMPLEMENTED FIXES:**
 
-  * Replace each MCP’s `otel.go` with a **HTTP‑first exporter** (`otlptracehttp`) that **falls back** to gRPC only if explicitly requested.
-  * Add/align OTEL deps, **rebuild all MCP binaries** into `~/go/bin`.
-* **Verify:**
+  **Python/ADK:**
+  * **Removed every `OTEL_*` line from `genmedia_agent/.env`** 
+  * **Added `sitecustomize.py`** in ADK venv to force HTTP/protobuf endpoints
+  * **Added OpenInference instrumentation** with `openinference-instrumentation-google-adk` and `arize-otel`
+  * **Configured automatic Arize registration** in `agent.py`
 
-  * Quick STDIO ping: `echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | ~/go/bin/mcp-imagen-go`.
-  * Run ADK, generate an image, confirm traces under projects/services like **`genmedia-adk`** and **`mcp-imagen-go`**.
-* **Critical gotcha:** The headers export must be **a single line**: `space_id=...,api_key=...`. No wrapping.
+  **Go MCPs:**
+  * **Replaced each MCP's `otel.go`** with HTTP‑first exporter (`otlptracehttp`)
+  * **Added required Arize resource attributes** (`external_model_id`, `model_id`, `model_version`)
+  * **Rebuilt all MCP binaries** with HTTP/protobuf support
+
+* **VERIFIED WORKING:**
+  * **ADK Agent**: Full tracing with OpenInference instrumentation
+  * **MCP Servers**: All show `OTEL exporter ready — protocol=http/protobuf`
+  * **End-to-End**: Unified traces from ADK → MCP servers in Arize
+  * **Test Result**: Red barn image generated successfully with complete trace visibility
 
 ---
 
@@ -154,7 +161,41 @@ export OTEL_TRACES_SAMPLER=always_on
 export OTEL_TRACES_SAMPLER_ARG=1.0
 ````
 
-4. **Run the ADK and generate something** (e.g., Imagen) to produce spans.
+4. **Add OpenInference Instrumentation to ADK Agent**
+
+**Why:** ADK agent needed proper instrumentation to generate traces for LLM calls and tool orchestration.
+
+**Packages installed:**
+```bash
+cd ~/lrepos/google-genai-media-master-repo/experiments/mcp-genmedia/sample-agents/adk
+source .venv/bin/activate
+pip install openinference-instrumentation-google-adk arize-otel
+```
+
+**Code added to** `genmedia_agent/agent.py`:
+```python
+# Add Arize OpenInference instrumentation
+try:
+    import arize.otel
+    from openinference.instrumentation.google_adk import GoogleADKInstrumentor
+    
+    # Register with Arize using environment variables
+    arize.otel.register(
+        space_id=os.getenv("ARIZE_SPACE_ID"),
+        api_key=os.getenv("ARIZE_API_KEY"),
+        project_name=os.getenv("ARIZE_PROJECT_NAME", "genmedia-adk")
+    )
+    
+    # Instrument ADK automatically
+    GoogleADKInstrumentor().instrument()
+    
+except ImportError as e:
+    print(f"Warning: Could not import Arize OTEL instrumentation: {e}")
+except Exception as e:
+    print(f"Warning: Could not initialize Arize OTEL instrumentation: {e}")
+```
+
+5. **Run the ADK and generate something** (e.g., Imagen) to produce spans.
 
 ### B) MCPs (Go) changes
 

@@ -184,6 +184,10 @@ func initResource(service, version string) (*resource.Resource, error) {
 	attrs := []attribute.KeyValue{
 		semconv.ServiceNameKey.String(service),
 		semconv.ServiceVersionKey.String(version),
+		// Required by Arize
+		attribute.String("external_model_id", service),
+		attribute.String("model_id", service),
+		attribute.String("model_version", version),
 	}
 	if env := strings.TrimSpace(os.Getenv("DEPLOY_ENV")); env != "" {
 		attrs = append(attrs, semconv.DeploymentEnvironmentKey.String(env))

@@ -24,7 +24,21 @@ from google.adk.tools.mcp_tool.mcp_toolset import (
     StdioServerParameters,
 )
 
+# Arize OpenInference instrumentation for ADK
+from arize.otel import register
+from openinference.instrumentation.google_adk import GoogleADKInstrumentor
+
 load_dotenv()
+
+# Register with Arize AX using environment variables
+tracer_provider = register(
+    space_id=os.getenv("ARIZE_SPACE_ID"),
+    api_key=os.getenv("ARIZE_API_KEY"),
+    project_name=os.getenv("ARIZE_PROJECT_NAME", "genmedia-adk")
+)
+
+# Instrument Google ADK for automatic tracing
+GoogleADKInstrumentor().instrument(tracer_provider=tracer_provider)
 
 project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
 
