@@ -94,7 +94,7 @@ avtool = MCPToolset(
 
 
 root_agent = LlmAgent(
-    model='gemini-2.0-flash',
+    model=os.getenv("AGENT_MODEL", "gemini-2.0-flash"),
     name='genmedia_agent',
         instruction="""You're a creative assistant that can help users with creating audio, images, and video via your generative media tools. You also have the ability to composit these using your available tools.
         Feel free to be helpful in your suggestions, based on the information you know or can retrieve from your tools.

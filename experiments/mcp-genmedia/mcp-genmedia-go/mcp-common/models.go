@@ -33,15 +33,15 @@ type ImagenModelInfo struct {
 
 // SupportedImagenModels is the single source of truth for all supported Imagen models.
 var SupportedImagenModels = map[string]ImagenModelInfo{
-	"imagen-3.0-generate-002": {
-		CanonicalName: "imagen-3.0-generate-002",
-		MaxImages:     4,
-		Aliases:       []string{"Imagen 3"},
-	},
 	"imagen-4.0-generate-001": {
 		CanonicalName: "imagen-4.0-generate-001",
 		MaxImages:     4,
 		Aliases:       []string{"Imagen 4", "Imagen4"},
+	},
+	"imagen-3.0-generate-002": {
+		CanonicalName: "imagen-3.0-generate-002",
+		MaxImages:     4,
+		Aliases:       []string{"Imagen 3"},
 	},
 	"imagen-4.0-fast-generate-001": {
 		CanonicalName: "imagen-4.0-fast-generate-001",
@@ -109,6 +109,15 @@ type VeoModelInfo struct {
 
 // SupportedVeoModels is the single source of truth for all supported Veo models.
 var SupportedVeoModels = map[string]VeoModelInfo{
+	"veo-3.0-generate-001": {
+		CanonicalName:         "veo-3.0-generate-001",
+		Aliases:               []string{"Veo 3"},
+		MinDuration:           8,
+		MaxDuration:           8,
+		DefaultDuration:       8,
+		MaxVideos:             2,
+		SupportedAspectRatios: []string{"16:9"},
+	},
 	"veo-2.0-generate-001": {
 		CanonicalName:         "veo-2.0-generate-001",
 		Aliases:               []string{"Veo 2"},
