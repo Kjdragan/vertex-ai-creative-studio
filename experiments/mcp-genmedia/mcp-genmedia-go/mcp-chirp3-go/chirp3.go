@@ -198,12 +198,12 @@ func parseMcpPronunciations(pronunciationsParam interface{}, encodingStr string)
 // on the configured transport (stdio, sse, or http).
 func main() {
 	// Initialize OpenTelemetry
-	tp, err := common.InitTracerProvider(serviceName, version)
+	shutdown, err := InitTracerProvider(context.Background(), serviceName, version)
 	if err != nil {
 		log.Fatalf("failed to initialize tracer provider: %v", err)
 	}
 	defer func() {
-		if err := tp.Shutdown(context.Background()); err != nil {
+		if err := shutdown(context.Background()); err != nil {
 			log.Printf("Error shutting down tracer provider: %v", err)
 		}
 	}()
