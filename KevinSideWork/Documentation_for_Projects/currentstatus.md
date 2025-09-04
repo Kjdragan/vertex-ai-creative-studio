@@ -1,8 +1,8 @@
 # Google GenAI Media Master Repository - Current Status
 
-**Last Updated:** September 4, 2025 08:16 UTC  
+**Last Updated:** September 4, 2025 13:36 UTC  
 **Project:** MCP Server Environment Variables and OpenTelemetry Tracing Integration  
-**Status:** ✅ FULLY OPERATIONAL
+**Status:** ✅ FULLY OPERATIONAL - Environment Variable Warnings Eliminated
 
 ---
 
@@ -14,7 +14,7 @@ This document serves as the **source of truth** for the current state of the Goo
 
 **Primary Objective:** Fix MCP Server Environment Variables and OpenTelemetry Tracing issues for stable media generation
 
-**Key Achievement:** Successfully resolved all critical timeout and environment variable issues. System is now fully operational.
+**Key Achievement:** Successfully resolved all critical timeout and environment variable issues. **Latest:** Eliminated all environment variable warnings by ensuring all MCP servers receive all bucket path variables. System is now fully operational with clean startup logs.
 
 ## System Architecture Overview
 
@@ -42,9 +42,8 @@ This document serves as the **source of truth** for the current state of the Goo
 - **Environment Variables:** Properly configured and passed to MCP servers
 
 ### 🟡 Minor Issues (Non-Critical)
-- **Environment Variable Warnings:** Cosmetic warnings in Go server logs about missing bucket paths (functionality works via fallbacks)
 - **MCP Session Cleanup:** Minor warnings during shutdown only
-- **OpenTelemetry Tracing:** Currently disabled to avoid context conflicts
+- **OpenTelemetry TracerProvider Override:** Single harmless warning during startup (expected behavior)
 
 ### 🚫 Known Limitations
 - **OpenTelemetry Tracing:** Disabled (`ENABLE_OTEL_TRACING=false`) to prevent TracerProvider conflicts
@@ -84,14 +83,17 @@ ARIZE_API_KEY=ak-b78262b2-f932-43f7-a57f-7e5e5733ad2e-RWDT9Q8u6co9vx8j3Nr3xSUh2k
 - **RESOLVED:** MCP server timeout issues (increased from 55s to 300s for Lyria)
 - **RESOLVED:** OpenTelemetry context detachment errors (disabled tracing)
 - **RESOLVED:** Environment variable propagation to MCP servers
+- **RESOLVED:** Environment variable warnings by passing all bucket paths to all MCP servers
 - **TESTED:** Successful music generation in 23 seconds with GCS upload
 - **CREATED:** Comprehensive evaluation report (`runevaluation.md`)
+- **CREATED:** Technical lessons learned documentation (`lessonslearned.md`)
 
 ### Key Fixes Applied
 1. **Timeout Configuration:**
    - Imagen: 180s, Chirp3: 180s, Veo: 480s, Avtool: 300s, Lyria: 300s
 2. **Environment Variables:**
    - Explicit passing of all required variables in `agent.py`
+   - **NEW:** All bucket path variables passed to all MCP servers to eliminate warnings
    - Proper fallback values to prevent Pydantic validation errors
 3. **OpenTelemetry:**
    - Disabled to eliminate context conflicts
@@ -122,8 +124,8 @@ ps aux | grep -E "mcp-.*-go|adk" | grep -v grep
 ## Next Steps / Future Work
 
 ### Immediate (Optional)
-- Investigate Go process environment variable propagation
 - Fix OpenTelemetry TracerProvider conflicts for re-enabling tracing
+- Consider implementing health monitoring for MCP servers
 
 ### Long-term
 - Implement health monitoring for MCP servers
@@ -137,6 +139,7 @@ ps aux | grep -E "mcp-.*-go|adk" | grep -v grep
 2. **MCP Server Not Starting:** Verify Go binaries exist in `/home/kjdrag/go/bin/`
 3. **Environment Variables:** Source `export_env.sh` before starting
 4. **Port Conflicts:** Kill existing processes with `pkill -f "adk"`
+5. **Environment Variable Warnings:** Ensure all bucket path variables are passed to all MCP servers in `agent.py`
 
 ### Log Locations
 - **ADK Server:** Console output when running `start_adk.sh`
@@ -147,20 +150,21 @@ ps aux | grep -E "mcp-.*-go|adk" | grep -v grep
 
 ## For New AI Assistants
 
-**Current Priority:** System is stable and operational. Focus on:
+**Current Priority:** System is stable and operational with clean startup logs. Focus on:
 1. Monitoring system health
-2. Addressing minor cosmetic issues if requested
-3. Implementing new features or improvements
-4. Maintaining this document with any significant changes
+2. Implementing new features or improvements
+3. Maintaining this document and `lessonslearned.md` with any significant changes
+4. Leveraging documented lessons to avoid repeating solved problems
 
 **Key Success Metrics:**
 - Music generation completing in <30 seconds
 - No timeout errors
 - Successful GCS uploads
 - All 5 MCP servers responding
+- Clean startup logs without environment variable warnings
 
 **Contact Context:** User (kjdrag) is working on WSL environment, prefers environment variable configuration, and values permanent fixes over temporary workarounds.
 
 ---
 
-*This document should be updated whenever significant changes are made to the system architecture, configuration, or status.*
+*This document should be updated whenever significant changes are made to the system architecture, configuration, or status. Companion document `lessonslearned.md` contains technical coding lessons and framework insights.*
