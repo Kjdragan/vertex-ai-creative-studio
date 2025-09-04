@@ -97,11 +97,31 @@ var SupportedVeoModels = map[string]VeoModelInfo{
 
 ### 4. **Chirp3 TTS Model Configuration**
 
-**Location**: No central configuration file found
-**Implementation**: Direct API calls to Google Cloud Text-to-Speech
-**Default Voice**: `en-US-Chirp3-HD-Zephyr` (hardcoded in MCP server)
-**Available Models**: All Chirp3-HD voices available through Google Cloud TTS API
-**Centralized**: ❌ No - voice selection handled dynamically via API
+**Location**: `/experiments/mcp-genmedia/mcp-genmedia-go/mcp-chirp3-go/chirp3.go`
+**Line**: 40
+**Implementation**: Dynamic API calls to Google Cloud Text-to-Speech with hardcoded default
+**Default Voice**: `en-US-Chirp3-HD-Achernar` (hardcoded constant)
+**Centralized**: ⚠️ Partial - default voice centralized, available voices fetched dynamically
+
+```go
+const (
+    serviceName             = "mcp-chirp3-go"
+    timeFormatForFilename = "20060102-150405"
+    defaultChirpVoiceName = "en-US-Chirp3-HD-Achernar"  // ← DEFAULT VOICE
+)
+```
+
+#### **How It Works**
+- At startup, the MCP server queries Google Cloud TTS API to fetch all available Chirp3-HD voices
+- Voices are cached in memory for the session
+- Default voice is hardcoded as a Go constant
+- No central registry like Imagen/Veo models - voices are dynamic from API
+
+#### **Voice Selection Process**
+1. If `voice_name` parameter provided → use that specific voice
+2. If not provided → try default voice (`en-US-Chirp3-HD-Achernar`)
+3. If default not available → use first available Chirp3-HD voice
+4. If no voices available → return error
 
 ---
 
@@ -156,7 +176,7 @@ MCP_SERVER_REQUEST_TIMEOUT=55000
 | **Agent** | Gemini | `agent.py:97` + `.env:12` | ✅ | `gemini-2.5-pro` |
 | **Imagen** | Image Generation | `models.go:35-56` | ✅ | `imagen-4.0-generate-001` |
 | **Veo** | Video Generation | `models.go:111-139` | ✅ | `veo-3.0-generate-001` |
-| **Chirp3** | Text-to-Speech | Dynamic API | ❌ | `en-US-Chirp3-HD-Zephyr` |
+| **Chirp3** | Text-to-Speech | `chirp3.go:40` | ⚠️ | `en-US-Chirp3-HD-Achernar` |
 | **Environment** | Runtime Config | `.env` | ✅ | See file |
 | **MCP Servers** | Server Config | `genmedia-config.json` | ✅ | Template only |
 

@@ -97,25 +97,35 @@ func scrubHeaders(h map[string]string) map[string]string {
 	return out
 }
 
-// initOpenTelemetry is called by main() in each MCP.
-func initOpenTelemetry(serviceName, serviceVersion string) (func(context.Context) error, error) {
-	// Decide transport (default HTTP)
-	proto := strings.ToLower(firstNonEmpty(
-		os.Getenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"),
-		os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"),
-	))
-	if proto == "" || strings.HasPrefix(proto, "http") {
-		proto = "http/protobuf"
+func setupOTel() func() {
+	// Check if OpenTelemetry tracing is disabled
+	if strings.ToLower(strings.TrimSpace(os.Getenv("ENABLE_OTEL_TRACING"))) == "false" {
+		log.Printf("OpenTelemetry tracing disabled via ENABLE_OTEL_TRACING=false")
+		return func() {} // Return no-op cleanup function
 	}
 
+	// Determine protocol (http vs grpc)
+	proto := firstNonEmpty(
+		os.Getenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"),
+		os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"),
+		"http/protobuf",
+	)
 	endpoint := firstNonEmpty(
 		os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
 		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 	)
-
 	headers := parseHeaders()
+
+	log.Printf("OTel setup: protocol=%s, endpoint=%s, headers=%v", proto, endpoint, scrubHeaders(headers))
+
+	// Decide transport (default HTTP)
+	if proto == "" || strings.HasPrefix(proto, "http") {
+		proto = "http/protobuf"
+	}
+
 	if headers["space_id"] == "" || headers["api_key"] == "" {
-		return nil, fmt.Errorf("missing ARIZE creds: space_id or api_key")
+		log.Printf("missing ARIZE creds: space_id or api_key")
+		return func() {} // Return no-op cleanup function
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

@@ -251,9 +251,12 @@ func lyriaGenerateMusicHandler(ctx context.Context, request mcp.CallToolRequest)
 
 	if userProvidedBucket != "" {
 		gcsBucketParam = userProvidedBucket
+	} else if appConfig.LyriaBucketPath != "" {
+		gcsBucketParam = appConfig.LyriaBucketPath
+		log.Printf("Handler lyria_generate_music: 'output_gcs_bucket' parameter not provided, using default from LYRIA_BUCKET_PATH: %s", gcsBucketParam)
 	} else if appConfig.GenmediaBucket != "" {
 		gcsBucketParam = appConfig.GenmediaBucket
-		log.Printf("Handler lyria_generate_music: 'output_gcs_bucket' parameter not provided, using default from GENMEDIA_BUCKET: %s", gcsBucketParam)
+		log.Printf("Handler lyria_generate_music: 'output_gcs_bucket' parameter not provided, using fallback from GENMEDIA_BUCKET: %s", gcsBucketParam)
 	}
 
 	if gcsBucketParam != "" { // Only trim prefix if bucket is actually set

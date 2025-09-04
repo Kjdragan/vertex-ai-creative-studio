@@ -44,51 +44,133 @@ project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
 
 # MCP Client (STDIO)
 # assumes you've installed the MCP server on your path
-veo = MCPToolset(
+imagen = MCPToolset(
     connection_params=StdioConnectionParams(
         server_params=StdioServerParameters(
-            command="mcp-veo-go",
-            env=dict(os.environ, PROJECT_ID=project_id),
+            command="/home/kjdrag/go/bin/mcp-imagen-go",
+            args=[],
+            env={
+                "PROJECT_ID": os.getenv("PROJECT_ID"),
+                "LOCATION": os.getenv("LOCATION"),
+                "GENMEDIA_BUCKET": os.getenv("GENMEDIA_BUCKET"),
+                "IMAGEN_BUCKET_PATH": os.getenv("IMAGEN_BUCKET_PATH"),
+                "GOOGLE_APPLICATION_CREDENTIALS": os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+                "ARIZE_API_KEY": os.getenv("ARIZE_API_KEY"),
+                "ARIZE_SPACE_ID": os.getenv("ARIZE_SPACE_ID"),
+                "ARIZE_PROJECT_NAME": os.getenv("ARIZE_PROJECT_NAME"),
+                "ARIZE_INTERFACE": os.getenv("ARIZE_INTERFACE"),
+                "OTEL_EXPORTER_OTLP_TRACES_HEADERS": os.getenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", ""),
+                "OTEL_EXPORTER_OTLP_HEADERS": os.getenv("OTEL_EXPORTER_OTLP_HEADERS", ""),
+                "OTEL_EXPORTER_OTLP_ENDPOINT": os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", ""),
+                "ENABLE_OTEL_TRACING": os.getenv("ENABLE_OTEL_TRACING", "false"),
+            },
         ),
-        timeout=60,
+        timeout=180,
     ),
 )
 
 chirp3 = MCPToolset(
     connection_params=StdioConnectionParams(
-            server_params=StdioServerParameters(
-                command="mcp-chirp3-go",
-                env=dict(os.environ, PROJECT_ID=project_id),
-            ),
-            timeout=60,
+        server_params=StdioServerParameters(
+            command="/home/kjdrag/go/bin/mcp-chirp3-go",
+            args=[],
+            env={
+                "PROJECT_ID": os.getenv("PROJECT_ID"),
+                "LOCATION": os.getenv("LOCATION"),
+                "GENMEDIA_BUCKET": os.getenv("GENMEDIA_BUCKET"),
+                "CHIRP3_BUCKET_PATH": os.getenv("CHIRP3_BUCKET_PATH"),
+                "GOOGLE_APPLICATION_CREDENTIALS": os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+                "ARIZE_API_KEY": os.getenv("ARIZE_API_KEY"),
+                "ARIZE_SPACE_ID": os.getenv("ARIZE_SPACE_ID"),
+                "ARIZE_PROJECT_NAME": os.getenv("ARIZE_PROJECT_NAME"),
+                "ARIZE_INTERFACE": os.getenv("ARIZE_INTERFACE"),
+                "OTEL_EXPORTER_OTLP_TRACES_HEADERS": os.getenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", ""),
+                "OTEL_EXPORTER_OTLP_HEADERS": os.getenv("OTEL_EXPORTER_OTLP_HEADERS", ""),
+                "OTEL_EXPORTER_OTLP_ENDPOINT": os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", ""),
+                "ENABLE_OTEL_TRACING": os.getenv("ENABLE_OTEL_TRACING", "false"),
+            },
+        ),
+        timeout=180,
     ),
 )
 
-imagen = MCPToolset(
+veo = MCPToolset(
     connection_params=StdioConnectionParams(
         server_params=StdioServerParameters(
-            command="mcp-imagen-go",
-            env=dict(os.environ, PROJECT_ID=project_id),
+            command="/home/kjdrag/go/bin/mcp-veo-go",
+            args=[],
+            env={
+                "PROJECT_ID": os.getenv("PROJECT_ID"),
+                "LOCATION": os.getenv("LOCATION"),
+                "GENMEDIA_BUCKET": os.getenv("GENMEDIA_BUCKET"),
+                "VEO_BUCKET_PATH": os.getenv("VEO_BUCKET_PATH"),
+                "GOOGLE_APPLICATION_CREDENTIALS": os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+                "ARIZE_API_KEY": os.getenv("ARIZE_API_KEY"),
+                "ARIZE_SPACE_ID": os.getenv("ARIZE_SPACE_ID"),
+                "ARIZE_PROJECT_NAME": os.getenv("ARIZE_PROJECT_NAME"),
+                "ARIZE_INTERFACE": os.getenv("ARIZE_INTERFACE"),
+                "OTEL_EXPORTER_OTLP_TRACES_HEADERS": os.getenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", ""),
+                "OTEL_EXPORTER_OTLP_HEADERS": os.getenv("OTEL_EXPORTER_OTLP_HEADERS", ""),
+                "OTEL_EXPORTER_OTLP_ENDPOINT": os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", ""),
+                "ENABLE_OTEL_TRACING": os.getenv("ENABLE_OTEL_TRACING", "false"),
+            },
         ),
-        timeout=60,
+        timeout=480,
     ),
 )
-
-# MCP Client (SSE)
-# assumes you've started the MCP server separately
-# e.g. mcp-imagen-go --transport sse
-# from google.adk.tools.mcp_tool.mcp_toolset import SseServerParams
-# remote_imagen, _ = MCPToolset(
-#     connection_params=SseServerParams(url="http://localhost:8080/sse"),
-# )
 
 avtool = MCPToolset(
     connection_params=StdioConnectionParams(
         server_params=StdioServerParameters(
-            command="mcp-avtool-go",
-            env=dict(os.environ, PROJECT_ID=project_id),
+            command="/home/kjdrag/go/bin/mcp-avtool-go",
+            args=[],
+            env={
+                "PROJECT_ID": os.getenv("PROJECT_ID"),
+                "LOCATION": os.getenv("LOCATION"),
+                "GENMEDIA_BUCKET": os.getenv("GENMEDIA_BUCKET"),
+                "AVTOOL_BUCKET_PATH": os.getenv("AVTOOL_BUCKET_PATH"),
+                "GOOGLE_APPLICATION_CREDENTIALS": os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+                "ARIZE_API_KEY": os.getenv("ARIZE_API_KEY"),
+                "ARIZE_SPACE_ID": os.getenv("ARIZE_SPACE_ID"),
+                "ARIZE_PROJECT_NAME": os.getenv("ARIZE_PROJECT_NAME"),
+                "ARIZE_INTERFACE": os.getenv("ARIZE_INTERFACE"),
+                "OTEL_EXPORTER_OTLP_TRACES_HEADERS": os.getenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", ""),
+                "OTEL_EXPORTER_OTLP_HEADERS": os.getenv("OTEL_EXPORTER_OTLP_HEADERS", ""),
+                "OTEL_EXPORTER_OTLP_ENDPOINT": os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", ""),
+                "ENABLE_OTEL_TRACING": os.getenv("ENABLE_OTEL_TRACING", "false"),
+            },
         ),
-        timeout=240,
+        timeout=300,
+    ),
+)
+
+lyria = MCPToolset(
+    connection_params=StdioConnectionParams(
+        server_params=StdioServerParameters(
+            command="/home/kjdrag/go/bin/mcp-lyria-go",
+            args=[],
+            env={
+                "PROJECT_ID": os.getenv("PROJECT_ID"),
+                "LOCATION": os.getenv("LOCATION"),
+                "GENMEDIA_BUCKET": os.getenv("GENMEDIA_BUCKET"),
+                "LYRIA_BUCKET_PATH": os.getenv("LYRIA_BUCKET_PATH"),
+                "GOOGLE_APPLICATION_CREDENTIALS": os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+                "ARIZE_API_KEY": os.getenv("ARIZE_API_KEY"),
+                "ARIZE_SPACE_ID": os.getenv("ARIZE_SPACE_ID"),
+                "ARIZE_PROJECT_NAME": os.getenv("ARIZE_PROJECT_NAME"),
+                "ARIZE_INTERFACE": os.getenv("ARIZE_INTERFACE"),
+                "OTEL_EXPORTER_OTLP_TRACES_HEADERS": os.getenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", ""),
+                "OTEL_EXPORTER_OTLP_HEADERS": os.getenv("OTEL_EXPORTER_OTLP_HEADERS", ""),
+                "OTEL_EXPORTER_OTLP_ENDPOINT": os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", ""),
+                "ENABLE_OTEL_TRACING": os.getenv("ENABLE_OTEL_TRACING", "false"),
+            },
+        ),
+        timeout=180,
     ),
 )
 
@@ -96,11 +178,11 @@ avtool = MCPToolset(
 root_agent = LlmAgent(
     model=os.getenv("AGENT_MODEL", "gemini-2.0-flash"),
     name='genmedia_agent',
-        instruction="""You're a creative assistant that can help users with creating audio, images, and video via your generative media tools. You also have the ability to composit these using your available tools.
+        instruction="""You're a creative assistant that can help users with creating audio, images, video, and music via your generative media tools. You also have the ability to composit these using your available tools.
         Feel free to be helpful in your suggestions, based on the information you know or can retrieve from your tools.
         If you're asked to translate into other languages, please do.
         """,
     tools=[
-       imagen, chirp3, veo, avtool,
+       imagen, chirp3, veo, avtool, lyria,
     ],
 )

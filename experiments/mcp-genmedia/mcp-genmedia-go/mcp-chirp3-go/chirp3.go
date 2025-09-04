@@ -37,7 +37,7 @@ var (
 const (
 	serviceName             = "mcp-chirp3-go"
 	timeFormatForFilename = "20060102-150405"
-	defaultChirpVoiceName = "en-US-Chirp3-HD-Zephyr"
+	defaultChirpVoiceName = "en-US-Chirp3-HD-Achernar"
 )
 
 // LanguageNameToCodeMap maps descriptive language names (lowercase) to BCP-47 codes (canonical casing).
