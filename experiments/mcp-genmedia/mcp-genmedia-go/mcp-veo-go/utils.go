@@ -15,11 +15,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
 
+	"cloud.google.com/go/storage"
 	common "github.com/GoogleCloudPlatform/vertex-ai-creative-studio/experiments/mcp-genmedia/mcp-genmedia-go/mcp-common"
 )
 
@@ -37,7 +39,7 @@ func inferMimeTypeFromURI(uri string) string {
 }
 
 // parseCommonVideoParams extracts and validates video generation parameters from the request arguments.
-func parseCommonVideoParams(args map[string]interface{}, appConfig *common.Config) (string, string, string, string, int32, int32, error) {
+func parseCommonVideoParams(ctx context.Context, args map[string]interface{}, appConfig *common.Config) (string, string, string, string, int32, int32, error) {
 	// Model
 	modelInput, ok := args["model"].(string)
 	if !ok || modelInput == "" {
@@ -50,14 +52,25 @@ func parseCommonVideoParams(args map[string]interface{}, appConfig *common.Confi
 	model := canonicalName
 	modelDetails := common.SupportedVeoModels[model]
 
-	// GCS Bucket
-	gcsBucket, _ := args["bucket"].(string)
-	if gcsBucket != "" {
-		gcsBucket = common.EnsureGCSPathPrefix(gcsBucket)
-	} else if appConfig.GenmediaBucket != "" {
-		gcsBucket = fmt.Sprintf("gs://%s/veo_outputs/", appConfig.GenmediaBucket)
-		log.Printf("Handler: 'bucket' parameter not provided, using default constructed from GENMEDIA_BUCKET: %s", gcsBucket)
+	// GCS Bucket - Use smart bucket resolution
+	userBucket, _ := args["bucket"].(string)
+	
+	// Create GCS client for bucket resolution
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return "", "", "", "", 0, 0, fmt.Errorf("failed to create GCS client for bucket resolution: %w", err)
 	}
+	defer client.Close()
+	
+	// Resolve bucket using smart resolution
+	bucketResult := common.ResolveBucket(ctx, client, userBucket)
+	if !bucketResult.IsValid {
+		return "", "", "", "", 0, 0, fmt.Errorf("bucket resolution failed: %v", bucketResult.Error)
+	}
+	
+	// Construct full GCS URI with veo_outputs path
+	gcsBucket := fmt.Sprintf("gs://%s/veo_outputs/", bucketResult.BucketName)
+	log.Printf("Handler: resolved bucket '%s' from source '%s' -> %s", bucketResult.BucketName, bucketResult.Source, gcsBucket)
 
 	// Output Directory
 	outputDir, _ := args["output_directory"].(string)

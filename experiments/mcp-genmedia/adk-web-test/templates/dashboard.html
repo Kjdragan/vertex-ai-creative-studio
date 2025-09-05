@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ADK Session Management Dashboard</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { background: #4285f4; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .status-good { color: #0f9d58; font-weight: bold; }
+        .status-bad { color: #ea4335; font-weight: bold; }
+        .btn { padding: 10px 20px; background: #4285f4; color: white; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+        .btn:hover { background: #3367d6; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .env-var { margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 ADK Session Management Dashboard</h1>
+            <p>Testing interface for Agent Development Kit integration</p>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <h2>Service Status</h2>
+                <div id="service-status">
+                    <p>Loading...</p>
+                </div>
+                <button class="btn" onclick="refreshStatus()">Refresh Status</button>
+            </div>
+            
+            <div class="card">
+                <h2>Quick Actions</h2>
+                <button class="btn" onclick="runValidation()">Run Validation Tests</button>
+                <button class="btn" onclick="testSession()">Test Session Management</button>
+                <button class="btn" onclick="window.location.href='/validation'">View Validation Details</button>
+                <button class="btn" onclick="window.location.href='/session-test'">Session Test Page</button>
+            </div>
+            
+            <div class="card">
+                <h2>Environment</h2>
+                <div id="environment-status">
+                    <p>Loading...</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Recent Activity</h2>
+            <div id="activity-log">
+                <p>No recent activity</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function refreshStatus() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    updateServiceStatus(data);
+                    updateEnvironmentStatus(data.services.environment || {});
+                });
+        }
+        
+        function updateServiceStatus(data) {
+            const statusDiv = document.getElementById('service-status');
+            let html = `<p>Last check: ${data.last_check || 'Never'}</p>`;
+            
+            if (data.services.go_services) {
+                const status = data.services.go_services.available ? 'status-good' : 'status-bad';
+                html += `<p>Go Services: <span class="${status}">${data.services.go_services.message}</span></p>`;
+            }
+            
+            statusDiv.innerHTML = html;
+        }
+        
+        function updateEnvironmentStatus(envData) {
+            const envDiv = document.getElementById('environment-status');
+            let html = '';
+            
+            for (const [key, value] of Object.entries(envData)) {
+                const status = value.set ? 'status-good' : 'status-bad';
+                html += `<div class="env-var">
+                    <strong>${key}:</strong> 
+                    <span class="${status}">${value.set ? '✓' : '✗'}</span>
+                    <br><small>${value.value}</small>
+                </div>`;
+            }
+            
+            envDiv.innerHTML = html || '<p>No environment data</p>';
+        }
+        
+        function runValidation() {
+            const activityLog = document.getElementById('activity-log');
+            activityLog.innerHTML = '<p>Running validation tests...</p>';
+            
+            fetch('/api/validate')
+                .then(response => response.json())
+                .then(data => {
+                    let html = `<h3>Validation Results</h3>
+                        <p>Tests: ${data.passed_tests}/${data.total_tests} passed (${data.success_rate}%)</p>
+                        <ul>`;
+                    
+                    data.tests.forEach(test => {
+                        const status = test.status === 'passed' ? 'status-good' : 'status-bad';
+                        html += `<li><span class="${status}">${test.name}</span> - ${test.duration}`;
+                        if (test.error) html += ` (${test.error})`;
+                        html += '</li>';
+                    });
+                    
+                    html += '</ul>';
+                    activityLog.innerHTML = html;
+                });
+        }
+        
+        function testSession() {
+            const activityLog = document.getElementById('activity-log');
+            activityLog.innerHTML = '<p>Testing session management...</p>';
+            
+            fetch('/api/test-session')
+                .then(response => response.json())
+                .then(data => {
+                    let html = `<h3>Session Test Results</h3>
+                        <p>Session ID: ${data.session_id}</p>
+                        <p>User ID: ${data.user_id}</p>
+                        <ul>`;
+                    
+                    data.operations.forEach(op => {
+                        const status = op.status === 'success' ? 'status-good' : 'status-bad';
+                        html += `<li><span class="${status}">${op.operation}</span>`;
+                        if (op.bucket) html += ` - Bucket: ${op.bucket}`;
+                        if (op.count) html += ` - Count: ${op.count}`;
+                        html += '</li>';
+                    });
+                    
+                    html += '</ul>';
+                    activityLog.innerHTML = html;
+                });
+        }
+        
+        // Auto-refresh status every 30 seconds
+        setInterval(refreshStatus, 30000);
+        
+        // Initial load
+        refreshStatus();
+    </script>
+</body>
+</html>

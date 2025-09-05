@@ -20,6 +20,7 @@ import (
 	"log"
 	"strings"
 
+	"cloud.google.com/go/storage"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"google.golang.org/genai"
@@ -38,7 +39,7 @@ func veoTextToVideoHandler(client *genai.Client, ctx context.Context, request mc
 		return mcp.NewToolResultError("prompt must be a non-empty string and is required for text-to-video"), nil
 	}
 
-	gcsBucket, outputDir, model, finalAspectRatio, numberOfVideos, durationSecs, err := parseCommonVideoParams(request.GetArguments(), appConfig)
+	gcsBucket, outputDir, model, finalAspectRatio, numberOfVideos, durationSecs, err := parseCommonVideoParams(ctx, request.GetArguments(), appConfig)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -83,15 +84,32 @@ func veoImageToVideoHandler(client *genai.Client, ctx context.Context, request m
 	ctx, span := tr.Start(ctx, "veo_i2v")
 	defer span.End()
 
-	imageURI, ok := request.GetArguments()["image_uri"].(string)
-	if !ok || strings.TrimSpace(imageURI) == "" {
-		return mcp.NewToolResultError("image_uri must be a non-empty string (GCS URI) and is required for image-to-video"), nil
-	}
-	if !strings.HasPrefix(imageURI, "gs://") {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid image_uri '%s'. Must be a GCS URI starting with 'gs://'", imageURI)), nil
+	// Get image parameter (can be GCS URI or inline data)
+	imageParam := request.GetArguments()["image_uri"]
+	if imageParam == nil {
+		return mcp.NewToolResultError("image_uri parameter is required for image-to-video"), nil
 	}
 
+	// Get user-specified bucket for potential inline data uploads
+	userBucket, _ := request.GetArguments()["bucket"].(string)
+
+	// Create GCS client for image processing
+	gcsClient, err := storage.NewClient(ctx)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to create GCS client: %v", err)), nil
+	}
+	defer gcsClient.Close()
+
+	// Process image parameter (handles both GCS URIs and inline data)
+	imageResult := common.ProcessMCPImageParameterWithBucketResolution(ctx, gcsClient, imageParam, userBucket)
+	if imageResult.Error != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("image processing failed: %v", imageResult.Error)), nil
+	}
+
+	imageURI := imageResult.GCSUri
 	var mimeType string
+
+	// Handle MIME type
 	if mt, ok := request.GetArguments()["mime_type"].(string); ok && strings.TrimSpace(mt) != "" {
 		mimeType = strings.ToLower(strings.TrimSpace(mt))
 		if mimeType != "image/jpeg" && mimeType != "image/png" {
@@ -100,12 +118,25 @@ func veoImageToVideoHandler(client *genai.Client, ctx context.Context, request m
 		}
 		log.Printf("Using provided and validated MIME type: %s", mimeType)
 	} else {
-		mimeType = inferMimeTypeFromURI(imageURI)
-		if mimeType == "" {
-			log.Printf("Could not infer a supported MIME type (image/jpeg or image/png) from image_uri: %s. Please provide a 'mime_type' parameter.", imageURI)
-			return mcp.NewToolResultError(fmt.Sprintf("MIME type for image '%s' could not be inferred or is not supported. Please specify 'mime_type' as 'image/jpeg' or 'image/png'.", imageURI)), nil
+		// Use detected MIME type from processing or infer from URI
+		if imageResult.MIMEType != "" {
+			mimeType = imageResult.MIMEType
+			log.Printf("Using detected MIME type: %s", mimeType)
+		} else {
+			mimeType = inferMimeTypeFromURI(imageURI)
+			if mimeType == "" {
+				log.Printf("Could not infer a supported MIME type (image/jpeg or image/png) from image_uri: %s. Please provide a 'mime_type' parameter.", imageURI)
+				return mcp.NewToolResultError(fmt.Sprintf("MIME type for image '%s' could not be inferred or is not supported. Please specify 'mime_type' as 'image/jpeg' or 'image/png'.", imageURI)), nil
+			}
+			log.Printf("Inferred MIME type: %s for image_uri: %s", mimeType, imageURI)
 		}
-		log.Printf("Inferred MIME type: %s for image_uri: %s", mimeType, imageURI)
+	}
+
+	// Log processing summary
+	if imageResult.IsInlineData {
+		log.Printf("Processed inline image data and uploaded to: %s", imageURI)
+	} else {
+		log.Printf("Using provided GCS URI: %s", imageURI)
 	}
 
 	prompt := ""
@@ -113,7 +144,7 @@ func veoImageToVideoHandler(client *genai.Client, ctx context.Context, request m
 		prompt = strings.TrimSpace(promptArg)
 	}
 
-	gcsBucket, outputDir, modelName, finalAspectRatio, numberOfVideos, durationSecs, err := parseCommonVideoParams(request.GetArguments(), appConfig)
+	gcsBucket, outputDir, modelName, finalAspectRatio, numberOfVideos, durationSecs, err := parseCommonVideoParams(ctx, request.GetArguments(), appConfig)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
