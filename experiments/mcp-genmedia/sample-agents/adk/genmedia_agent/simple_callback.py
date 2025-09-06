@@ -7,6 +7,10 @@ Based on the ADK callback documentation, this implements a simple function-based
 import logging
 import re
 from typing import Optional, Any
+try:
+    from google.cloud import storage  # type: ignore
+except Exception:  # pragma: no cover
+    storage = None  # type: ignore
 import google.genai.types as types
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.tools.tool_context import ToolContext
@@ -84,6 +88,13 @@ async def before_tool_callback(tool: BaseTool, args: dict[str, Any], tool_contex
             gcs_uri = await handler.load_artifact_as_gcs_uri(tool_context, artifact_filename)
             if gcs_uri and gcs_uri.startswith('gs://'):
                 args['image_uri'] = gcs_uri
+                # Auto-infer mime_type if missing
+                if not args.get('mime_type'):
+                    lower_uri = gcs_uri.lower()
+                    if ".jpg/" in lower_uri or ".jpeg/" in lower_uri or lower_uri.endswith('.jpg') or lower_uri.endswith('.jpeg'):
+                        args['mime_type'] = 'image/jpeg'
+                    elif ".png/" in lower_uri or lower_uri.endswith('.png'):
+                        args['mime_type'] = 'image/png'
                 logger.info(f"Converted artifact '{artifact_ref}' -> '{gcs_uri}' for tool '{tool_name}'")
             else:
                 logger.warning(
@@ -108,6 +119,12 @@ async def before_tool_callback(tool: BaseTool, args: dict[str, Any], tool_contex
                         )
                         if gcs_uri_fallback and gcs_uri_fallback.startswith('gs://'):
                             args['image_uri'] = gcs_uri_fallback
+                            if not args.get('mime_type'):
+                                lu = gcs_uri_fallback.lower()
+                                if ".jpg/" in lu or ".jpeg/" in lu or lu.endswith('.jpg') or lu.endswith('.jpeg'):
+                                    args['mime_type'] = 'image/jpeg'
+                                elif ".png/" in lu or lu.endswith('.png'):
+                                    args['mime_type'] = 'image/png'
                             logger.info(
                                 f"Fallback succeeded: '{artifact_ref}' -> '{gcs_uri_fallback}'"
                             )
@@ -130,12 +147,76 @@ async def before_tool_callback(tool: BaseTool, args: dict[str, Any], tool_contex
                                 )
                                 if gcs_uri_guess and gcs_uri_guess.startswith('gs://'):
                                     args['image_uri'] = gcs_uri_guess
+                                    if not args.get('mime_type'):
+                                        lug = gcs_uri_guess.lower()
+                                        if ".jpg/" in lug or ".jpeg/" in lug or lug.endswith('.jpg') or lug.endswith('.jpeg'):
+                                            args['mime_type'] = 'image/jpeg'
+                                        elif ".png/" in lug or lug.endswith('.png'):
+                                            args['mime_type'] = 'image/png'
                                     logger.info(
                                         f"Fuzzy fallback succeeded: '{artifact_ref}' -> '{gcs_uri_guess}'"
                                     )
                                     return None
                 except Exception as fe2:
                     logger.warning(f"Fuzzy fallback failed: {fe2}")
+
+        # If the tool is passed a gs:// image directly and mime_type is missing, infer it
+        if 'image_uri' in args and isinstance(args['image_uri'], str) and args['image_uri'].startswith('gs://') and not args.get('mime_type'):
+            lower_uri = args['image_uri'].lower()
+            if ".jpg/" in lower_uri or ".jpeg/" in lower_uri or lower_uri.endswith('.jpg') or lower_uri.endswith('.jpeg'):
+                args['mime_type'] = 'image/jpeg'
+            elif ".png/" in lower_uri or lower_uri.endswith('.png'):
+                args['mime_type'] = 'image/png'
+
+        # If the tool is passed a gs:// image, validate existence; if missing, try to replace with the latest session artifact
+        if 'image_uri' in args and isinstance(args['image_uri'], str) and args['image_uri'].startswith('gs://'):
+            try:
+                needs_replace = False
+                if storage is not None:
+                    # Parse bucket and blob path
+                    guri = args['image_uri']
+                    without_scheme = guri[len('gs://'):]
+                    parts = without_scheme.split('/', 1)
+                    if len(parts) == 2 and parts[0] and parts[1]:
+                        bucket_name, blob_path = parts[0], parts[1]
+                        client = storage.Client()
+                        bucket = client.bucket(bucket_name)
+                        blob = bucket.blob(blob_path)
+                        if not blob.exists():
+                            needs_replace = True
+                            logger.warning(f"Provided gs:// image does not exist: {guri}; attempting to use latest session artifact instead")
+                # If storage not available, use heuristic: if name looks like a fabricated artifact path (e.g., contains '/image_<n>.')
+                else:
+                    try:
+                        import re as _re
+                        if _re.search(r"/image_\d+\.", args['image_uri']):
+                            needs_replace = True
+                    except Exception:
+                        if '/image_0.' in args['image_uri']:
+                            needs_replace = True
+                if needs_replace:
+                    image_artifacts = tool_context.state.get('image_artifacts', [])
+                    if isinstance(image_artifacts, list) and image_artifacts:
+                        fallback_entry = image_artifacts[-1]
+                        fallback_filename = (
+                            fallback_entry.split(':', 1)[1]
+                            if isinstance(fallback_entry, str) and ':' in fallback_entry
+                            else fallback_entry
+                        )
+                        handler = ADKArtifactHandler()
+                        gcs_uri_latest = await handler.load_artifact_as_gcs_uri(tool_context, fallback_filename)
+                        if gcs_uri_latest and gcs_uri_latest.startswith('gs://'):
+                            args['image_uri'] = gcs_uri_latest
+                            # Re-infer mime_type if missing
+                            if not args.get('mime_type'):
+                                lu2 = gcs_uri_latest.lower()
+                                if ".jpg/" in lu2 or ".jpeg/" in lu2 or lu2.endswith('.jpg') or lu2.endswith('.jpeg'):
+                                    args['mime_type'] = 'image/jpeg'
+                                elif ".png/" in lu2 or lu2.endswith('.png'):
+                                    args['mime_type'] = 'image/png'
+                            logger.info(f"Replaced invalid gs:// image with latest artifact URI: {gcs_uri_latest}")
+            except Exception as ex:
+                logger.warning(f"Validation of gs:// image or artifact replacement failed: {ex}")
 
         # Returning None lets the tool proceed
         return None

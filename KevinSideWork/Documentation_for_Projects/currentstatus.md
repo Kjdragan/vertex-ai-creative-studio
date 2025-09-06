@@ -1,6 +1,6 @@
 # Google GenAI Media Master Repository - Current Status
 
-**Last Updated:** September 5, 2025 20:11 UTC  
+**Last Updated:** September 5, 2025 22:14 (local)  
 **Project:** MCP Server Environment Variables, OpenTelemetry Tracing Integration, and ADK Session Management  
 **Status:** ✅ FULLY OPERATIONAL - Enhanced with Comprehensive Arize Tracing and ADK Session Management
 
@@ -47,6 +47,9 @@ This document serves as the **source of truth** for the current state of the Goo
 - **Enhanced Tracing:** OpenInference semantic attributes providing detailed span hierarchy
 - **Smart Bucket Resolution:** Priority-based bucket resolution with validation
 - **Inline Media Processing:** Support for base64/data URL image uploads
+- **Artifact → GCS URI Conversion:** `before_tool_callback` converts `artifact:user_image_0.jpg` to valid `gs://...` prior to MCP calls
+- **GCS ArtifactService Default:** `start_adk.sh` launches ADK with `--artifact_service_uri gs://<bucket>` for deterministic artifact URIs
+- **Signed URL Tool:** Local ADK tool `gcs_signed_url(gs_uri, expiry_seconds)` returns a time-limited HTTPS link for any `gs://` object
 
 ### 🟡 Minor Issues (Non-Critical)
 - **MCP Session Cleanup:** Minor warnings during shutdown only
@@ -107,6 +110,10 @@ ARIZE_INTERFACE=mcp-servers
 - **ENHANCED:** Media handling with smart bucket resolution and inline image processing
 - **DOCUMENTED:** Complete integration guide for enhanced tracing implementation
 - **IMPROVED:** Error handling and observability across all MCP operations
+// Additional on Sep 5 (later run)
+- **FIXED:** Artifact URI handling for uploaded images via ADK callbacks (indexing from 0) and `before_tool_callback` conversion to GCS
+- **ADDED:** Local FunctionTool `gcs_signed_url` for generating temporary HTTPS links to outputs
+- **POLISH:** Auto-infer `mime_type` in callback when missing (jpg/png), corrected Veo i2v log formatting placeholders
 
 ### September 4, 2025
 - **RESOLVED:** MCP server timeout issues (increased from 55s to 300s for Lyria)

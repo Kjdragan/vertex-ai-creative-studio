@@ -300,6 +300,51 @@ func ProcessImageInput(input string) (gcsURI string, err error) {
 
 **Key Insight:** Supporting multiple input formats improves user experience without breaking existing functionality.
 
+### ✅ **Lesson: ADK Artifact → GCS URI Conversion in Callbacks**
+**Problem:** MCP tools reject `artifact:` URIs (require `gs://`). LLM sometimes referenced `artifact:user_image_0.jpg` directly.
+
+**Solution:** Implement `before_tool_callback` to resolve `artifact:` references to `gs://` using ADK's `ArtifactService` and session context. Include robust fallbacks and auto-infer `mime_type` if missing (`.jpg`/`.jpeg` → `image/jpeg`, `.png` → `image/png`).
+
+```python
+# simple_callback.py (excerpt)
+if 'image_uri' in args and str(args['image_uri']).startswith('artifact:'):
+    gcs_uri = await handler.load_artifact_as_gcs_uri(tool_context, artifact_filename)
+    if gcs_uri:
+        args['image_uri'] = gcs_uri
+        if not args.get('mime_type'):
+            # infer from extension
+            ...
+```
+
+**Key Insight:** Doing this at the callback layer guarantees MCP tools always receive valid `gs://` URIs while keeping prompts simple and artifact-centric.
+
+### ✅ **Lesson: Default to GCS ArtifactService at Startup**
+**Pattern:** Start ADK with `--artifact_service_uri gs://<bucket>` to ensure deterministic artifact URIs without requiring inline uploads.
+
+```bash
+# start_adk.sh
+uv run adk web --artifact_service_uri "gs://${GENMEDIA_ARTIFACT_BUCKET}"
+```
+
+**Key Insight:** GCS-backed artifacts simplify resolution and make callback logic more reliable (list_versions, versioned paths), while still allowing a fallback for in-memory services.
+
+### ✅ **Lesson: Signed URLs for Browser-Friendly Links**
+**Problem:** Users want clickable HTTPS links instead of `gs://` URIs.
+
+**Solution:** Add a local ADK `FunctionTool` `gcs_signed_url(gs_uri, expiry_seconds=3600)` that returns a short-lived HTTPS URL using GCS V4 signed URLs.
+
+```python
+# agent.py (excerpt)
+from google.adk.tools import FunctionTool
+
+def gcs_signed_url(gs_uri: str, expiry_seconds: int = 3600) -> dict:
+    ... # returns {gs_uri, public_url, expires_at}
+
+tools=[..., FunctionTool(gcs_signed_url)]
+```
+
+**Security Note:** Signed URLs expire automatically; prefer them over public buckets. Ensure `google-cloud-storage` is installed in the ADK runtime.
+
 ### ✅ **Lesson: Service Account Authentication**
 **Pattern:** Use `GOOGLE_APPLICATION_CREDENTIALS` environment variable pointing to service account JSON:
 ```bash

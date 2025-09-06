@@ -18,6 +18,7 @@ import os
 # as of google-adk==1.3.0, StdioConnectionParams
 from dotenv import load_dotenv
 from google.adk.agents import LlmAgent
+from google.adk.tools.function_tool import FunctionTool
 from google.adk.tools.mcp_tool.mcp_toolset import (
     MCPToolset,
     StdioConnectionParams,
@@ -26,12 +27,59 @@ from google.adk.tools.mcp_tool.mcp_toolset import (
 from google.adk.artifacts import GcsArtifactService
 from google.adk.sessions import InMemorySessionService
 from .simple_callback import before_agent_callback, before_tool_callback
+from datetime import datetime, timedelta
+try:
+    from google.cloud import storage  # type: ignore
+except Exception:  # pragma: no cover
+    storage = None  # type: ignore
+from typing import Optional
 
 # Arize OpenInference instrumentation for ADK
 from arize.otel import register
 from openinference.instrumentation.google_adk import GoogleADKInstrumentor
 
 load_dotenv()
+
+def gcs_signed_url(gs_uri: str, expiry_seconds: int = 3600) -> dict:
+    """
+    Generate a time-limited signed HTTPS URL for a given GCS object.
+
+    Args:
+      gs_uri: The GCS URI of the object, e.g. "gs://bucket/path/to/object".
+      expiry_seconds: Number of seconds the URL should remain valid (default 3600).
+
+    Returns:
+      A dict with keys:
+        - gs_uri: original gs:// URI
+        - public_url: signed HTTPS URL
+        - expires_at: ISO8601 timestamp when the URL expires
+    """
+    if not gs_uri or not gs_uri.startswith("gs://"):
+        return {"error": "Invalid gs_uri. Must start with gs://"}
+
+    try:
+        if storage is None:
+            return {"error": "google-cloud-storage is not installed in the ADK environment. Please install 'google-cloud-storage' to enable signed URL generation."}
+        # Parse bucket and blob path
+        without_scheme = gs_uri[len("gs://"):]
+        parts = without_scheme.split("/", 1)
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            return {"error": "Invalid gs_uri format. Expected gs://<bucket>/<object>"}
+        bucket_name, blob_path = parts[0], parts[1]
+
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(seconds=int(expiry_seconds)),
+            method="GET",
+        )
+        expires_at = (datetime.utcnow() + timedelta(seconds=int(expiry_seconds))).isoformat() + "Z"
+        return {"gs_uri": gs_uri, "public_url": url, "expires_at": expires_at}
+    except Exception as e:
+        return {"error": f"Failed to generate signed URL: {e}"}
 
 # Register with Arize AX using environment variables
 tracer_provider = register(
@@ -212,11 +260,13 @@ root_agent = LlmAgent(
         
         DO NOT create fake GCS URIs. Always use the artifact system for uploaded images.
         
+        After generation, if the user asks for a direct link to outputs, call the local tool gcs_signed_url(gs_uri) with the returned gs:// object to provide a clickable HTTPS link.
+
         Feel free to be helpful in your suggestions, based on the information you know or can retrieve from your tools.
         If you're asked to translate into other languages, please do.
         """,
     tools=[
-       imagen, chirp3, veo, avtool, lyria,
+       imagen, chirp3, veo, avtool, lyria, FunctionTool(gcs_signed_url),
     ],
     before_agent_callback=before_agent_callback,
     before_tool_callback=before_tool_callback,
