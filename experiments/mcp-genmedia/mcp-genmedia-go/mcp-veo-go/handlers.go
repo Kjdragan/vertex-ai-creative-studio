@@ -100,8 +100,12 @@ func veoImageToVideoHandler(client *genai.Client, ctx context.Context, request m
 	}
 	defer gcsClient.Close()
 
-	// Process image parameter (handles both GCS URIs and inline data)
-	imageResult := common.ProcessMCPImageParameterWithBucketResolution(ctx, gcsClient, imageParam, userBucket)
+	// Process image parameter (handles GCS URIs, inline data, and ADK artifacts)
+	artifactProcessor := common.NewADKArtifactProcessor(gcsClient)
+	imageResult, err := artifactProcessor.ProcessArtifactParameter(ctx, imageParam, userBucket)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("artifact processing failed: %v", err)), nil
+	}
 	if imageResult.Error != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("image processing failed: %v", imageResult.Error)), nil
 	}

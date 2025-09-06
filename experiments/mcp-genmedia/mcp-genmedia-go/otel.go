@@ -172,7 +172,8 @@ func setupOTel() func() {
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
+		log.Printf("Failed to create OTLP exporter: %v", err)
+		return func() {} // Return no-op cleanup function
 	}
 
 	res, _ := resource.New(ctx,
@@ -190,6 +191,6 @@ func setupOTel() func() {
 	)
 	otel.SetTracerProvider(tp)
 
-	fmt.Printf("🔭 OTEL exporter ready — transport=%s, endpoint=%s, headers=%v\n", proto, firstNonEmpty(endpoint, "(default)"), scrubHeaders(headers))
-	return tp.Shutdown, nil
+	log.Printf("OTEL exporter ready — protocol=%s, endpoint=%s, headers=%v", proto, firstNonEmpty(endpoint, "(default)"), scrubHeaders(headers))
+	return tp.Shutdown
 }

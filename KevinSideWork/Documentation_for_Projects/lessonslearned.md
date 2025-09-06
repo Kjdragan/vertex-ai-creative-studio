@@ -1,6 +1,6 @@
 # Lessons Learned - Google GenAI Media Master Repository
 
-*Last Updated: 2025-09-04*
+*Last Updated: 2025-09-05*
 
 This document serves as a technical reference and source of truth for coding lessons learned, framework insights, and solution patterns discovered during development. It helps prevent repeating solved problems and ensures consistent implementation patterns across the project.
 
@@ -8,11 +8,13 @@ This document serves as a technical reference and source of truth for coding les
 1. [Environment Variable Management](#environment-variable-management)
 2. [MCP Server Configuration](#mcp-server-configuration)
 3. [OpenTelemetry & Tracing](#opentelemetry--tracing)
-4. [Google Cloud Integration](#google-cloud-integration)
-5. [Error Handling Patterns](#error-handling-patterns)
-6. [Performance & Timeout Management](#performance--timeout-management)
-7. [Security Best Practices](#security-best-practices)
-8. [Development Workflow](#development-workflow)
+4. [ADK Session Management](#adk-session-management)
+5. [Enhanced Arize Tracing](#enhanced-arize-tracing)
+6. [Google Cloud Integration](#google-cloud-integration)
+7. [Error Handling Patterns](#error-handling-patterns)
+8. [Performance & Timeout Management](#performance--timeout-management)
+9. [Security Best Practices](#security-best-practices)
+10. [Development Workflow](#development-workflow)
 
 ---
 
@@ -111,6 +113,135 @@ headers := map[string]string{
 
 ---
 
+## ADK Session Management
+
+### ✅ **Lesson: ADK Native Session Management Integration**
+**Problem:** Custom session management was handling resource lifecycle but not leveraging ADK's built-in session capabilities.
+
+**Solution:** Integrate with ADK's native SessionService and MemoryService:
+```python
+# In ADK configuration
+session_service = VertexAiSessionService(project_id=project_id, location=location)
+memory_service = VertexAiMemoryBankService(project_id=project_id, location=location)
+```
+
+**Key Components:**
+- **SessionService**: Manages conversation threads and session lifecycle
+- **MemoryService**: Provides cross-session knowledge persistence
+- **InvocationContext**: Provides session context during agent execution
+
+**Key Insight:** ADK's session management provides better integration with the agent lifecycle and enables cross-session memory persistence.
+
+### ✅ **Lesson: Resource Management within ADK Sessions**
+**Pattern:** Adapt custom resource management to work within ADK's session framework:
+```go
+// Maintain resource cleanup capabilities within ADK session lifecycle
+type SessionResourceManager struct {
+    sessionID string
+    resources map[string]func() error
+    timeout   time.Duration
+}
+
+func (srm *SessionResourceManager) RegisterCleanup(resourceID string, cleanup func() error) {
+    srm.resources[resourceID] = cleanup
+}
+```
+
+**Key Insight:** Resource management should complement ADK sessions rather than replace them.
+
+---
+
+## Enhanced Arize Tracing
+
+### ✅ **Lesson: OpenInference Semantic Attributes**
+**Problem:** Basic tracing lacked detail and standardized attributes for LLM/AI operations.
+
+**Solution:** Implement OpenInference semantic conventions:
+```go
+span.SetAttributes(
+    attribute.String("openinference.span.kind", "TOOL"),
+    attribute.String("input.value", userPrompt),
+    attribute.String("output.value", generatedContent),
+    attribute.String("tool_call.function.name", toolName),
+    attribute.String("tool_call.function.arguments", parametersJSON),
+)
+```
+
+**Key Attributes:**
+- `openinference.span.kind`: TOOL, LLM, CHAIN, AGENT, RETRIEVER, EMBEDDING
+- `input.value`: User input or prompt
+- `output.value`: Generated content or result
+- `tool_call.function.*`: Tool execution details
+
+### ✅ **Lesson: MCP-Specific Tracing Attributes**
+**Pattern:** Add MCP-specific context to spans:
+```go
+span.SetAttributes(
+    attribute.String("mcp.tool.name", toolName),
+    attribute.String("mcp.server.name", serverName),
+    attribute.String("mcp.operation", operationType),
+    attribute.String("mcp.parameters", parametersJSON),
+    attribute.String("mcp.result", resultURI),
+)
+```
+
+### ✅ **Lesson: Processing Stage Tracking**
+**Pattern:** Track detailed processing stages for better observability:
+```go
+// Update processing stage throughout operation
+span.SetAttributes(attribute.String("processing.stage", "bucket_resolution"))
+// ... bucket resolution logic
+span.SetAttributes(attribute.String("processing.stage", "api_request"))
+// ... API call
+span.SetAttributes(attribute.String("processing.stage", "gcs_upload"))
+// ... upload logic
+```
+
+**Key Stages:**
+- `preparation`: Initial setup and validation
+- `bucket_resolution`: Smart bucket resolution
+- `api_request`: External API calls
+- `response_processing`: Processing API responses
+- `gcs_upload`: File upload operations
+- `completion`: Final result processing
+- `cleanup`: Resource cleanup
+
+### ✅ **Lesson: Error Context in Tracing**
+**Pattern:** Record detailed error context with processing stage:
+```go
+func RecordError(span trace.Span, err error, stage string) {
+    span.SetAttributes(
+        attribute.String("mcp.error", err.Error()),
+        attribute.String("processing.status", "failed"),
+        attribute.String("processing.stage", stage),
+    )
+    span.RecordError(err)
+    span.SetStatus(codes.Error, err.Error())
+}
+```
+
+**Key Insight:** Error context with processing stage enables faster debugging and root cause analysis.
+
+### ✅ **Lesson: Trace Correlation IDs**
+**Pattern:** Extract trace and span IDs for log correlation:
+```go
+func GetTraceInfo(ctx context.Context) (string, string) {
+    span := trace.SpanFromContext(ctx)
+    if span.SpanContext().IsValid() {
+        return span.SpanContext().TraceID().String(), span.SpanContext().SpanID().String()
+    }
+    return "", ""
+}
+
+// Use in logging
+traceID, spanID := tracer.GetTraceInfo(ctx)
+log.Printf("Operation started - TraceID: %s, SpanID: %s", traceID, spanID)
+```
+
+**Key Insight:** Trace correlation IDs enable linking logs, metrics, and traces for comprehensive debugging.
+
+---
+
 ## Google Cloud Integration
 
 ### ✅ **Lesson: GCS Bucket Path Patterns**
@@ -122,6 +253,52 @@ headers := map[string]string{
 - `gs://project-avtool` for composited media
 
 **Key Insight:** Separate buckets improve organization, access control, and cost tracking.
+
+### ✅ **Lesson: Smart Bucket Resolution**
+**Problem:** Hardcoded bucket names caused bucket-not-found errors when buckets didn't exist.
+
+**Solution:** Implement priority-based bucket resolution with validation:
+```go
+type BucketResolver struct {
+    validator *BucketValidator
+}
+
+func (br *BucketResolver) ResolveBucket(userBucket, envBucket, defaultBucket string) (string, error) {
+    // Priority: user-specified > environment > default
+    candidates := []string{userBucket, envBucket, defaultBucket}
+    
+    for _, bucket := range candidates {
+        if bucket != "" {
+            if err := br.validator.ValidateBucket(bucket); err == nil {
+                return bucket, nil
+            }
+        }
+    }
+    return "", errors.New("no valid bucket found")
+}
+```
+
+**Key Insight:** Smart bucket resolution with validation eliminates runtime bucket errors.
+
+### ✅ **Lesson: Inline Media Processing**
+**Problem:** MCP handlers only accepted GCS URIs, limiting user experience with uploaded images.
+
+**Solution:** Support both GCS URIs and inline base64/data URL images:
+```go
+func ProcessImageInput(input string) (gcsURI string, err error) {
+    if strings.HasPrefix(input, "gs://") {
+        return input, nil // Already a GCS URI
+    }
+    
+    if strings.HasPrefix(input, "data:") || isBase64(input) {
+        return uploadInlineImage(input) // Process and upload inline data
+    }
+    
+    return "", errors.New("invalid image input format")
+}
+```
+
+**Key Insight:** Supporting multiple input formats improves user experience without breaking existing functionality.
 
 ### ✅ **Lesson: Service Account Authentication**
 **Pattern:** Use `GOOGLE_APPLICATION_CREDENTIALS` environment variable pointing to service account JSON:
@@ -241,8 +418,10 @@ export LOCATION="us-central1"
 
 ### ADK (Agent Development Kit)
 - **MCPToolset Configuration:** Always specify explicit timeouts and environment variables
-- **Session Management:** Sessions are created automatically; focus on tool configuration
+- **Session Management:** Use native SessionService and MemoryService for proper lifecycle management
 - **Error Handling:** Structured error responses work better than plain text errors
+- **Resource Management:** Integrate custom resource cleanup with ADK session lifecycle
+- **Cross-Session Memory:** Leverage MemoryService for knowledge persistence across conversations
 
 ### Go MCP Servers
 - **Initialization:** Global client initialization should happen once during server startup
@@ -272,6 +451,18 @@ export LOCATION="us-central1"
 
 5. **❌ Don't:** Ignore OpenTelemetry conflicts
    **✅ Do:** Provide toggle mechanisms for tracing systems
+
+6. **❌ Don't:** Use basic tracing without semantic attributes
+   **✅ Do:** Implement OpenInference semantic conventions for LLM/AI operations
+
+7. **❌ Don't:** Hardcode bucket names in MCP handlers
+   **✅ Do:** Use smart bucket resolution with validation
+
+8. **❌ Don't:** Only support GCS URIs for media inputs
+   **✅ Do:** Support both GCS URIs and inline base64/data URL processing
+
+9. **❌ Don't:** Implement custom session management when ADK provides native solutions
+   **✅ Do:** Integrate with ADK SessionService and MemoryService
 
 ---
 

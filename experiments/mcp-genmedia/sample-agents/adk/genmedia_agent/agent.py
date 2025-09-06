@@ -23,6 +23,9 @@ from google.adk.tools.mcp_tool.mcp_toolset import (
     StdioConnectionParams,
     StdioServerParameters,
 )
+from google.adk.artifacts import GcsArtifactService
+from google.adk.sessions import InMemorySessionService
+from .simple_callback import before_agent_callback, before_tool_callback
 
 # Arize OpenInference instrumentation for ADK
 from arize.otel import register
@@ -199,10 +202,22 @@ root_agent = LlmAgent(
     model=os.getenv("AGENT_MODEL", "gemini-2.0-flash"),
     name='genmedia_agent',
         instruction="""You're a creative assistant that can help users with creating audio, images, video, and music via your generative media tools. You also have the ability to composit these using your available tools.
+        
+        IMPORTANT: When users upload images, the system automatically saves them as artifacts. You can reference these artifacts in your tool calls:
+        1. Check session state for 'image_artifacts' to see available uploaded images
+        2. Use artifact filenames with "artifact:" prefix when calling MCP tools like veo_i2v
+        3. Example: veo_i2v with image_uri="artifact:user_image_0.jpg"
+        
+        The image artifact callback automatically handles uploaded images, so you don't need to manually save them.
+        
+        DO NOT create fake GCS URIs. Always use the artifact system for uploaded images.
+        
         Feel free to be helpful in your suggestions, based on the information you know or can retrieve from your tools.
         If you're asked to translate into other languages, please do.
         """,
     tools=[
        imagen, chirp3, veo, avtool, lyria,
     ],
+    before_agent_callback=before_agent_callback,
+    before_tool_callback=before_tool_callback,
 )
