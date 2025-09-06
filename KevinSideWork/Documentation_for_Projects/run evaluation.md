@@ -1,84 +1,102 @@
-# Run Evaluation — ADK GenMedia i2v Flow
+# Run Evaluation — ADK GenMedia i2v + TTS + Signed URL
 
-Date/time: 2025-09-05 22:04 (local)
+Date/time: 2025-09-06 13:56 (local)
+Session ID: `0a4f0145-5ea0-48b2-afc7-b60274850f98`
 
 ## Summary
-- The end-to-end image-to-video (i2v) flow succeeded using the uploaded image artifact.
-- Artifact URIs were correctly converted from `artifact:user_image_0.jpg` to a valid `gs://...` GCS URI by the `before_tool_callback`.
-- Veo 3 generated the video successfully and saved it to: `gs://supple-synapse-media/veo_outputs/17050361871438496886/sample_0.mp4`.
-- Total generation time reported by the tool: ~1m1s.
+- __Success__: Veo i2v generation succeeded using the uploaded image artifact.
+  - Video saved to `gs://supple-synapse-media/veo_outputs/11029419343277766449/sample_0.mp4`.
+- __Partial__: Agent attempted to combine TTS audio with the video via `ffmpeg_combine_audio_and_video`, but reported the audio object did not exist.
+- __Hiccup__: Signed URL generation failed even after adding Token Creator on a signer service account and setting `SIGNED_URL_SERVICE_ACCOUNT`.
 
-## What Was Exercised
-- ADK web started with GCS ArtifactService (`--artifact_service_uri`), ensuring deterministic GCS URIs.
-- Uploaded image was saved as artifact `user_image_0.jpg` (indexing now starts at 0 and counts only image parts).
-- `before_tool_callback` resolved `artifact:` to `gs://.../user_image_0.jpg/0` and Veo i2v consumed it.
-- When the first attempt omitted `mime_type`, the tool returned a guidance error; a retry including `mime_type: image/jpeg` succeeded.
+## Evidence (Terminal & Tracing)
+- Veo i2v success:
+  - "Generated 1 video(s) using model veo-3.0-generate-001. This took about 1m1s. Videos saved to GCS: gs://supple-synapse-media/veo_outputs/11029419343277766449/sample_0.mp4."
+- Combine failure:
+  - `ffmpeg_combine_audio_and_video` → "Failed to prepare input audio: failed to download gs://supple-synapse-media/chirp_outputs/11029419343277766449_0.wav from GCS: Object("chirp_outputs/11029419343277766449_0.wav").NewReader: storage: object doesn't exist"
+- Signed URL failure (tool `gcs_signed_url`):
+  - "Failed to generate signed URL: you need a private key to sign credentials. the credentials you are currently using <class 'google.oauth2.credentials.Credentials'> just contains a token... Ensure your ADK runtime uses sign-capable credentials... or set SIGNED_URL_SERVICE_ACCOUNT=<service-account-email> (or GOOGLE_IMPERSONATE_SERVICE_ACCOUNT) and grant your current principal 'Service Account Token Creator'."
+- Agent response fallback:
+  - "I am unable to provide a direct HTTP link... The tool I use to do this is currently unavailable... You can still access the video using the following gs:// URI..."
 
-## Terminal Log Highlights (abridged)
-```
-Using provided and validated MIME type: image/jpeg
-Handler: 'bucket' parameter not provided, using default constructed from GENMEDIA_BUCKET: gs://supple-synapse-media/veo_outputs/
-Initiating GenerateVideos (i2v) ... ImageGCSURI: gs://supple-synapse-media/.../user_image_0.jpg/0, ... Duration: 8s, OutputGCS: gs://supple-synapse-media/veo_outputs/
-GenerateVideos operation (i2v) ... completed. Total duration: 1m1s
-Successfully generated 1 videos (i2v) ... available at GCS URI: gs://supple-synapse-media/veo_outputs/17050361871438496886/sample_0.mp4
-```
+## Observations
+- __Inline audio present in trace__: The request context includes an `audio/wav` blob snippet (base64 truncated), suggesting TTS audio was produced inline (not saved to GCS).
+- __Agent attempted GCS combine path__: The combine tool used a presumed GCS path for TTS (`gs://supple-synapse-media/chirp_outputs/11029419343277766449_0.wav`) that did not exist.
+- __User experience__: Despite the combine error, the clicked video contained correct audio and voice. This implies either:
+  - Veo output already included audio (no combine needed), or
+  - A separate combine path succeeded outside the `ffmpeg_combine_audio_and_video` tool invocation tracked here.
+- __Environment__: `.env` shows `SIGNED_URL_SERVICE_ACCOUNT=genmedia-sa@supple-synapse-470916-a2.iam.gserviceaccount.com` and ADK startup script sources `.env`.
+- __Go workspace__: `experiments/mcp-genmedia/mcp-genmedia-go/go.work` requires `go 1.24.3`.
 
-## Observed Issues and Warnings
-- Missing MIME type on first attempt (then auto-retry succeeded)
-  - Tool initially returned: "MIME type ... could not be inferred ... Please specify 'image/jpeg' or 'image/png'."
-  - Impact: extra round-trip; user still got video.
-  - Recommendation: Auto-supply `mime_type` if missing in `before_tool_callback` by inferring from the artifact filename (e.g., `.jpg` → `image/jpeg`, `.png` → `image/png`).
+## Root Cause Analysis
+- __Signed URL (primary)__
+  - The ADK process is running under user ADC (`GOOGLE_APPLICATION_CREDENTIALS` → ADC token file), which cannot sign URLs locally.
+  - The `gcs_signed_url` implementation attempted IAM-based signing using `service_account_email` with ADC, but the installed `google-cloud-storage` likely defaulted to local signing and rejected the user token, or IAMCredentials API was not used by the library version in the ADK runtime.
+  - Result: Error indicating lack of private key on the credential, despite Token Creator being granted on the signer SA.
 
-- Logging format mismatch in Veo handler
-  - Example line shows arguments printed in the wrong placeholders (e.g., `OutputDir='image/jpeg'`, `Model=...prompt...`, `%!d(string=...)`).
-  - Impact: confusing logs; functionality unaffected.
-  - Recommendation: Fix the `fmt` argument order/format string in `handlers.go` for i2v logging.
+- __Audio/Video combine (secondary)__
+  - The agent attempted to combine with an audio file at a pre-computed GCS path that never got written, while the TTS output in this run appears inline (returned in the response) rather than persisted to GCS.
+  - There are missing guards:
+    - No existence check before calling `ffmpeg_combine_audio_and_video`.
+    - No fallback to upload inline audio to GCS if TTS doesn’t store directly.
+    - No detection to skip combine when the video already contains an audio track.
 
-- MCP session cleanup warnings
-  - Repeated warning: `Attempted to exit cancel scope in a different task than it was entered in` during MCP server restarts.
-  - Impact: benign during server lifecycle, but noisy.
-  - Recommendation: Investigate task/cancel-scope lifecycle; ensure cleanup happens within the same task scope. Low priority if functionality is unaffected.
+- __Messaging UX__
+  - When `gcs_signed_url` fails, the agent falls back to a generic apology message. We should return the `gs://` URI plus a clear “signed-link disabled” reason and a remediation hint, or attempt alternate signing strategies.
 
-- Vertex SDK warning about non-text parts
-  - `Warning: there are non-text parts in the response: ['function_call'] ...`
-  - Impact: expected when using tool calls; benign.
-  - Recommendation: No action required.
+## Plan to Fix (No code changes yet)
 
-## Performance Notes
-- Veo i2v generation completed in ~61 seconds for a single 8-second 16:9 video, consistent with expectations.
-- AFC (automatic function calling) enabled with max remote calls: 10; no signs of runaway calls.
+### Phase 1 — Environment & Access Validation
+- __Enable IAM Service Account Credentials API__ (`iamcredentials.googleapis.com`) on project `supple-synapse-470916-a2`.
+- __Confirm IAM bindings__:
+  - The caller identity (your current ADC principal) has `roles/iam.serviceAccountTokenCreator` on `genmedia-sa@supple-synapse-470916-a2.iam.gserviceaccount.com`.
+- __Verify `.env` is being sourced__ by `start_adk.sh` (it is) and that `SIGNED_URL_SERVICE_ACCOUNT` remains set.
 
-## UX Improvement: Provide Direct HTTP Link to Output Video
-Current output: a `gs://...` URI. Users often want a clickable HTTPS link.
+### Phase 2 — Signed URL Tool Robustness
+- __Prefer explicit impersonation credentials__ in `gcs_signed_url`:
+  - Use `google.auth.impersonated_credentials.Credentials` with `target_principal=<SIGNED_URL_SERVICE_ACCOUNT>` and `target_scopes=['https://www.googleapis.com/auth/cloud-platform']`, then call `blob.generate_signed_url(credentials=impersonated_creds)`.
+  - This avoids reliance on library auto-detection of IAM-based signing and works with user ADC.
+- __Runtime dependency__:
+  - Ensure ADK environment has a modern `google-cloud-storage` and `google-auth` supporting impersonation. Pin a known-good version in the ADK env (separate from repo `requirements.txt`).
+- __Graceful fallback__:
+  - On failure, return the `gs://` URI and include a short remediation ("Signed URL service not configured: enable IAM Credentials API / check Token Creator role / confirm signer SA") and optionally a Console object URL hint.
 
-Options to provide a validated HTTP URL:
-- Signed URL (recommended)
-  - Generate a short-lived V4 signed URL for the object (e.g., via Google Cloud Storage client libraries) and return it alongside the `gs://` in the tool response.
-  - Pros: secure, no need to make the bucket public; works from any browser; expires automatically.
-  - Where to implement:
-    - In the Veo MCP server: after upload/availability, compute `public_url` using signed URL and include in the tool response JSON (e.g., `{ gs_uri, public_url, expires_at }`).
-    - Alternatively, add a small ADK/MCP utility tool (e.g., `gcs_signed_url`) that returns a signed URL for any `gs://` path, which the agent can call after generation.
+### Phase 3 — Audio + Video Combine Reliability
+- __TTS output contract__:
+  - Always call `chirp_tts` with `output_gcs_bucket` (default to `GENMEDIA_BUCKET` or `CHIRP3_BUCKET_PATH`) so it saves to GCS and returns a `gs://` URI.
+  - If `chirp_tts` returns inline audio only, upload it to `gs://supple-synapse-media/chirp_outputs/<session>/<id>.wav` using our artifact/GCS handler, then proceed.
+- __Existence gating__:
+  - Before `ffmpeg_combine_audio_and_video`, verify both `gs://` objects exist via `storage.Client().bucket(...).blob(...).exists()` and emit a helpful error if missing.
+- __Skip when not needed__:
+  - Detect audio track in the video (via `ffprobe`/`ffmpeg -i`) and skip combine if audio is already present.
 
-- Public bucket/object
-  - Make the output prefix public and use `https://storage.googleapis.com/<bucket>/<object>`.
-  - Pros: simple; Cons: public access management and potential data exposure risks. Less recommended for default.
+### Phase 4 — Agent Messaging Improvements
+- When `gcs_signed_url` errors, reply with:
+  - The `gs://` URI
+  - A one-line reason (e.g., "Signed URL requires IAM impersonation")
+  - A button/instruction to retry after configuration (no generic "tool unavailable").
 
-- Cloud CDN / Website endpoint
-  - Front the bucket with Cloud CDN or website hosting endpoint for stable HTTPS URLs.
-  - Pros: cache, custom domain; Cons: extra setup/infra.
+### Phase 5 — Go Toolchain & Rebuild
+- Upgrade to Go 1.24.3+ to match `go.work` and `go.mod` directives.
+- Rebuild all MCP servers under `experiments/mcp-genmedia/mcp-genmedia-go/` so fixes (e.g., Veo log formatting) take effect.
+- Smoke test: Veo (t2v/i2v), Imagen, Chirp3, Lyria, AVTool.
 
-Recommendation: implement signed URL generation and return both `gs_uri` and `public_url` in the tool response.
+### Phase 6 — Observability
+- Extend Arize tracing to capture tool error fields for `gcs_signed_url` and combine failures (e.g., which URI failed existence check) for faster triage.
 
-## Overall Assessment
-- The core objective—converting `artifact:` to `gs://` and successfully running Veo i2v—was achieved.
-- The system behaved robustly: indexing is consistent (`user_image_0.jpg`), GCS artifact resolution works, and generation completed successfully.
-- Minor polish items remain (auto MIME type, log formatting, and cleanup warnings), none of which block functionality.
+## Open Questions
+- Does Veo i2v already include an audio track in some modes? If yes, we should add an explicit detection to avoid unnecessary combine.
+- Should we create an explicit "audio artifact" path similar to images to unify handling of inline audio?
 
-## Proposed Follow-ups (No changes made yet)
-- Auto-infer and inject `mime_type` in `before_tool_callback` if missing.
-- Add a signed-URL feature and include `public_url` in tool responses so the UI can present a clickable link.
-- Fix Veo i2v logging format string/argument order to eliminate `%!d(...)` artifacts.
-- Investigate MCP cleanup warning; ensure cancel scopes are exited in the same task.
+## Action Items (for next iteration)
+- __Signed URL__: implement explicit impersonated credentials in `gcs_signed_url`; verify IAM API enabled; re-run.
+- __Audio pipeline__: force TTS to write to GCS or upload inline audio; add existence checks; skip combine if audio already in video.
+- __Messaging__: improve fallback text and include console object URL.
+- __Go upgrade__: move to 1.24.3+, rebuild MCP servers, smoke test.
+- __Docs__: update `lessonslearned.md` and `currentstatus.md` with the above once implemented.
 
----
-Prepared based on logs from the successful run on 2025-09-05 (local time) and current system configuration (`USE_GCS_ARTIFACTS=true`).
+## References
+- `.env`: `experiments/mcp-genmedia/sample-agents/adk/genmedia_agent/.env`
+- Start script: `experiments/mcp-genmedia/sample-agents/adk/start_adk.sh`
+- Signed URL tool: `experiments/mcp-genmedia/sample-agents/adk/genmedia_agent/agent.py` (function `gcs_signed_url`)
+- MCP Go workspace: `experiments/mcp-genmedia/mcp-genmedia-go/go.work`

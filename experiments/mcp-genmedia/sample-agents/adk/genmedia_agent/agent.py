@@ -32,6 +32,10 @@ try:
     from google.cloud import storage  # type: ignore
 except Exception:  # pragma: no cover
     storage = None  # type: ignore
+try:
+    from google.auth import default as google_auth_default  # type: ignore
+except Exception:  # pragma: no cover
+    google_auth_default = None  # type: ignore
 from typing import Optional
 
 # Arize OpenInference instrumentation for ADK
@@ -71,15 +75,46 @@ def gcs_signed_url(gs_uri: str, expiry_seconds: int = 3600) -> dict:
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(blob_path)
 
-        url = blob.generate_signed_url(
-            version="v4",
-            expiration=timedelta(seconds=int(expiry_seconds)),
-            method="GET",
-        )
+        # Signing strategy:
+        # 1) If SIGNED_URL_SERVICE_ACCOUNT or GOOGLE_IMPERSONATE_SERVICE_ACCOUNT is set and google_auth_default is available,
+        #    attempt remote signing via IAMCredentials using ADC (user or workload identity) with signBlob on the target SA.
+        # 2) Otherwise, attempt local signing. This requires ADC to be a service account with a private key (e.g., key file).
+
+        signer_email = os.getenv("SIGNED_URL_SERVICE_ACCOUNT") or os.getenv("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT")
+        url: Optional[str] = None
+        err_primary: Optional[Exception] = None
+
+        if signer_email and google_auth_default is not None:
+            try:
+                creds, _ = google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                url = blob.generate_signed_url(
+                    version="v4",
+                    expiration=timedelta(seconds=int(expiry_seconds)),
+                    method="GET",
+                    service_account_email=signer_email,
+                    credentials=creds,
+                )
+            except Exception as e1:  # fallback to local signing
+                err_primary = e1
+
+        if url is None:
+            url = blob.generate_signed_url(
+                version="v4",
+                expiration=timedelta(seconds=int(expiry_seconds)),
+                method="GET",
+            )
         expires_at = (datetime.utcnow() + timedelta(seconds=int(expiry_seconds))).isoformat() + "Z"
         return {"gs_uri": gs_uri, "public_url": url, "expires_at": expires_at}
     except Exception as e:
-        return {"error": f"Failed to generate signed URL: {e}"}
+        # Add guidance for common misconfiguration: user ADC can't sign.
+        guidance = ""
+        if "private key" in str(e) or "sign" in str(e).lower():
+            guidance = (
+                " Ensure your ADK runtime uses sign-capable credentials. Options: "
+                "(1) Set GOOGLE_APPLICATION_CREDENTIALS to a Service Account JSON with Storage Object Viewer and iam.serviceAccounts.signBlob; or "
+                "(2) Set SIGNED_URL_SERVICE_ACCOUNT=<service-account-email> (or GOOGLE_IMPERSONATE_SERVICE_ACCOUNT) and grant your current principal 'Service Account Token Creator' on that service account."
+            )
+        return {"error": f"Failed to generate signed URL: {e}.{guidance}"}
 
 # Register with Arize AX using environment variables
 tracer_provider = register(
@@ -260,7 +295,7 @@ root_agent = LlmAgent(
         
         DO NOT create fake GCS URIs. Always use the artifact system for uploaded images.
         
-        After generation, if the user asks for a direct link to outputs, call the local tool gcs_signed_url(gs_uri) with the returned gs:// object to provide a clickable HTTPS link.
+        After generation, always include a clickable HTTPS link by calling the local tool gcs_signed_url(gs_uri) on every gs:// output object and return both gs_uri and public_url. If the tool fails, explain why and provide the gs:// URI.
 
         Feel free to be helpful in your suggestions, based on the information you know or can retrieve from your tools.
         If you're asked to translate into other languages, please do.
