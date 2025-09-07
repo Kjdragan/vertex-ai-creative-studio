@@ -36,6 +36,10 @@ try:
     from google.auth import default as google_auth_default  # type: ignore
 except Exception:  # pragma: no cover
     google_auth_default = None  # type: ignore
+try:
+    from google.auth.impersonated_credentials import Credentials as ImpersonatedCredentials  # type: ignore
+except Exception:  # pragma: no cover
+    ImpersonatedCredentials = None  # type: ignore
 from typing import Optional
 
 # Arize OpenInference instrumentation for ADK
@@ -87,13 +91,31 @@ def gcs_signed_url(gs_uri: str, expiry_seconds: int = 3600) -> dict:
         if signer_email and google_auth_default is not None:
             try:
                 creds, _ = google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-                url = blob.generate_signed_url(
-                    version="v4",
-                    expiration=timedelta(seconds=int(expiry_seconds)),
-                    method="GET",
-                    service_account_email=signer_email,
-                    credentials=creds,
-                )
+                # Prefer explicit IAM impersonation for signing when available.
+                if ImpersonatedCredentials is not None:
+                    imp_creds = ImpersonatedCredentials(
+                        source_credentials=creds,
+                        target_principal=signer_email,
+                        target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                        lifetime=3600,
+                    )
+                    url = blob.generate_signed_url(
+                        version="v4",
+                        expiration=timedelta(seconds=int(expiry_seconds)),
+                        method="GET",
+                        # Provide both the target SA email and the impersonated credentials for remote signing
+                        service_account_email=signer_email,
+                        credentials=imp_creds,
+                    )
+                else:
+                    # Fallback: let storage library attempt remote signing using ADC directly
+                    url = blob.generate_signed_url(
+                        version="v4",
+                        expiration=timedelta(seconds=int(expiry_seconds)),
+                        method="GET",
+                        service_account_email=signer_email,
+                        credentials=creds,
+                    )
             except Exception as e1:  # fallback to local signing
                 err_primary = e1
 

@@ -1,6 +1,6 @@
 # Lessons Learned - Google GenAI Media Master Repository
 
-*Last Updated: 2025-09-05*
+*Last Updated: 2025-09-07*
 
 This document serves as a technical reference and source of truth for coding lessons learned, framework insights, and solution patterns discovered during development. It helps prevent repeating solved problems and ensures consistent implementation patterns across the project.
 
@@ -477,6 +477,104 @@ export LOCATION="us-central1"
 - **Model Selection:** Different models have different capabilities and limits
 - **Timeout Handling:** Vertex AI operations can be slow; always set appropriate timeouts
 - **Error Responses:** Parse structured error responses for better user feedback
+#### Veo Native Audio Shaping Prompt (Example)
+Use this prompt when you want Veo 3 to generate and speak a specific line in its own native audio (no external TTS or overlays). This improves the chance that Veo produces aligned lips and an “alien” timbre, but exact verbatim speech is not guaranteed.
+
+```
+Create an 8-second, 16:9 video using the uploaded image artifact (use the latest item from session state `image_artifacts`, e.g., "artifact:user_image_0.jpg") with the Veo 3 model (veo-3.0-generate-001).
+
+Audio policy (STRICT):
+- Use ONLY the native, Veo-generated audio in this video.
+- DO NOT call or use: chirp_tts, list_chirp_voices, lyria_generate_music, or any ffmpeg_* tool that mixes/overlays external audio.
+- The ONLY allowed ffmpeg tool (if needed) is ffmpeg_get_media_info for verification.
+- Do NOT add music, backing tracks, or any external/non-Veo audio.
+
+Speech requirement (verbatim):
+- The alien faces the camera; mouth motion clearly synchronized to speech.
+- Speak EXACTLY the following line and nothing else:
+  "Happy birthday to you... happy birthday to you,,, happy birthday dear Kevin, Happy birthday to you!"
+- Timbre: deep, resonant, alien/monster tone; clear articulation (not whispering).
+- No extra words or sounds.
+
+Video parameters:
+- Duration: 8 seconds
+- Aspect ratio: 16:9
+- Framing: Close-up on the alien facing the camera
+
+Verification:
+- After generation, call ffmpeg_get_media_info to confirm exactly 1 audio stream is present.
+- Compare the spoken audio against the transcript. If it does not match EXACTLY, respond with:
+  STATUS=NATIVE_AUDIO_MISMATCH
+  MISMATCH_REASON=<brief reason>
+  NATIVE_VIDEO_GS_URI=<gs://...>
+  NATIVE_SIGNING=<call gcs_signed_url(gs_uri) and return {public_url, expires_at} if possible>
+- DO NOT fall back to TTS unless I explicitly reply with the exact token: CONFIRM_TTS_FALLBACK
+
+Deliverables (if match is exact):
+- NATIVE_VIDEO_GS_URI=<gs://...>
+- Call gcs_signed_url(gs_uri) and return: { public_url, expires_at }
+- TOOLS_USED=<list>
+- TRANSCRIPT_MATCH=TRUE
+```
+
+Notes
+- __Why it helps__: Strongly biases the agent to rely only on Veo’s native audio so the voice matches the visual style/timbre, while enforcing a single audio stream.
+- __Verification__: Use `ffmpeg_get_media_info` to ensure exactly 1 audio stream is present (AAC mono is common) and duration ~ video duration.
+- __Limitations__: Veo-native speech is probabilistic; it may not be verbatim. Use TTS + combine when exact words are mandatory.
+- __Related tools__: `veo_i2v`, `ffmpeg_get_media_info`, `gcs_signed_url()` (requires impersonation as documented above).
+
+#### Field-Tested Prompt (2025-09-06)
+Good example to shape Veo’s native audio without external TTS or overlays. Copy/paste as-is.
+
+```
+Create an 8-second, 16:9 video using the uploaded image artifact (use the latest item from session state `image_artifacts`, e.g., "artifact:user_image_0.jpg") with the Veo 3 model (veo-3.0-generate-001).
+
+Audio policy (STRICT):
+Use ONLY the native, Veo-generated audio in this video.
+DO NOT call or use: chirp_tts, list_chirp_voices, lyria_generate_music, or any ffmpeg_* tool that mixes/overlays external audio.
+The ONLY allowed ffmpeg tool (if needed) is ffmpeg_get_media_info for verification.
+Do NOT add music, backing tracks, or any external/non-Veo audio.
+
+Speech requirement (verbatim):
+The alien faces the camera; mouth motion clearly synchronized to speech.
+Speak EXACTLY the following line and nothing else: "Happy birthday to you... happy birthday to you,,, happy birthday dear Kevin, Happy birthday to you!"
+Timbre: deep, resonant, alien/monster tone; clear articulation (not whispering).
+No extra words or sounds.
+
+Video parameters:
+Duration: 8 seconds
+Aspect ratio: 16:9
+Framing: Close-up on the alien facing the camera
+
+Verification:
+After generation, call ffmpeg_get_media_info to confirm exactly 1 audio stream is present.
+Compare the spoken audio against the transcript. If it does not match EXACTLY, respond with: STATUS=NATIVE_AUDIO_MISMATCH MISMATCH_REASON= NATIVE_VIDEO_GS_URI=gs://... NATIVE_SIGNING=<call gcs_signed_url(gs_uri) and return {public_url, expires_at} if possible>
+DO NOT fall back to TTS unless I explicitly reply with the exact token: CONFIRM_TTS_FALLBACK
+
+Deliverables (if match is exact):
+NATIVE_VIDEO_GS_URI=gs://...
+Call gcs_signed_url(gs_uri) and return: { public_url, expires_at }
+TOOLS_USED=
+TRANSCRIPT_MATCH=TRUE
+```
+
+Observed outcome snippet
+
+```
+STATUS=NATIVE_AUDIO_MISMATCH
+MISMATCH_REASON=The Veo model's native audio generation is probabilistic and cannot be guaranteed to match the provided script verbatim. Although prompted with the exact text, the model may have ad-libbed or altered the speech. Programmatic verification of the spoken words is not possible.
+NATIVE_VIDEO_GS_URI=gs://supple-synapse-media/veo_outputs/15520646249243698122/sample_0.mp4
+NATIVE_SIGNING={"error": "Failed to generate signed URL. This is likely due to a security credential issue on the server side."}
+
+ffmpeg_get_media_info (excerpt):
+{
+  "streams": [
+    { "index": 0, "codec_type": "video", "width": 1280, "height": 720, "duration": "8.000000" },
+    { "index": 1, "codec_type": "audio", "codec_name": "aac", "channels": 1, "sample_rate": "44100", "duration": "7.905011" }
+  ],
+  "format": { "duration": "8.000000", "nb_streams": 2 }
+}
+```
 
 ---
 
@@ -508,6 +606,83 @@ export LOCATION="us-central1"
 
 9. **❌ Don't:** Implement custom session management when ADK provides native solutions
    **✅ Do:** Integrate with ADK SessionService and MemoryService
+
+---
+
+## 2025-09-06 — Handoff Snapshot and New Lessons
+
+### Run Evaluation 2 Snapshot (Session `c60b1549-d001-4c18-b145-3eb0723a0914`)
+- __Outcome__: Video and audio were successfully combined and uploaded.
+- __Final object__: `gs://supple-synapse-media/xenomorph_singing_happy_birthday.mp4`
+- __Console details__: https://console.cloud.google.com/storage/browser/_details/supple-synapse-media/xenomorph_singing_happy_birthday.mp4?project=supple-synapse-470916-a2
+- __Authenticated viewer__: https://storage.cloud.google.com/supple-synapse-media/xenomorph_singing_happy_birthday.mp4
+- __Signed URL__: Previously failed due to token-only ADC; IAM Service Account Credentials API is now enabled. The agent has been updated to use explicit IAM impersonation for signed URLs.
+
+### Signed URL Generation via IAM Impersonation (Update)
+- __Problem__: `gcs_signed_url()` failed with token-only ADC (error: needs a private key). Even with `SIGNED_URL_SERVICE_ACCOUNT` set and Token Creator granted, the library attempted local signing.
+- __Fix__: Force IAM impersonation and pass impersonated credentials to `blob.generate_signed_url(...)`.
+- __Code__: `experiments/mcp-genmedia/sample-agents/adk/genmedia_agent/agent.py` (function `gcs_signed_url`)
+
+```python
+from google.auth import default as google_auth_default
+from google.auth.impersonated_credentials import Credentials as ImpersonatedCredentials
+from google.cloud import storage
+from datetime import timedelta
+
+def gcs_signed_url(gs_uri: str, expiry_seconds: int = 3600) -> dict:
+    signer_email = os.getenv("SIGNED_URL_SERVICE_ACCOUNT") or os.getenv("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT")
+    client = storage.Client()
+    bucket_name, blob_path = gs_uri[len("gs://"):].split("/", 1)
+    blob = client.bucket(bucket_name).blob(blob_path)
+
+    creds, _ = google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    imp_creds = ImpersonatedCredentials(
+        source_credentials=creds,
+        target_principal=signer_email,
+        target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        lifetime=3600,
+    )
+
+    url = blob.generate_signed_url(
+        version="v4",
+        expiration=timedelta(seconds=int(expiry_seconds)),
+        method="GET",
+        service_account_email=signer_email,
+        credentials=imp_creds,
+    )
+    return {"gs_uri": gs_uri, "public_url": url}
+```
+
+- __Requirements__:
+  - Enable API: `iamcredentials.googleapis.com` (done)
+  - Env: `SIGNED_URL_SERVICE_ACCOUNT=<sa>@<project>.iam.gserviceaccount.com`
+  - Caller has `roles/iam.serviceAccountTokenCreator` on the signer SA
+  - Restart ADK after enabling the API to ensure runtime picks it up: `experiments/mcp-genmedia/sample-agents/adk/start_adk.sh`
+
+### Audio/Video Combine Preconditions (Callback Preflight)
+- __Problem__: First combine used a pseudo audio path `artifact:chirp_tts_response.result.content[1]` causing "local input file ... does not exist".
+- __Fixes in callback__: `experiments/mcp-genmedia/sample-agents/adk/genmedia_agent/simple_callback.py` (`before_tool_callback`)
+  - Default `chirp_tts` to set `output_directory='.'` if not provided, so a local WAV is created.
+  - Resolve `artifact:` audio placeholders by selecting the most recent `chirp_audio-*.wav`.
+  - Validate local and `gs://` inputs and log warnings if missing.
+  - Auto-set `output_gcs_bucket` from `GENMEDIA_BUCKET` for combine outputs.
+
+### Next Steps Checklist (for new assistant)
+- __Restart ADK__ to load code and API changes: `experiments/mcp-genmedia/sample-agents/adk/start_adk.sh`
+- __Verify signed URL__:
+  - Call `gcs_signed_url(gs_uri="gs://supple-synapse-media/xenomorph_singing_happy_birthday.mp4")`
+  - Expect `{ public_url, expires_at }` in response.
+- __Validate another i2v + TTS run__:
+  - Ensure TTS produces a real file (callback sets it); combine should upload directly to GCS.
+  - Agent should automatically return a clickable signed link for outputs.
+
+### Files and Paths Touched (2025-09-06)
+- `experiments/mcp-genmedia/sample-agents/adk/genmedia_agent/agent.py` — `gcs_signed_url` now uses explicit impersonation.
+- `experiments/mcp-genmedia/sample-agents/adk/genmedia_agent/simple_callback.py` — TTS default output + combine preflight checks.
+- `experiments/mcp-genmedia/sample-agents/adk/start_adk.sh` — sources `.env` and starts ADK with GCS ArtifactService.
+- Reports:
+  - `KevinSideWork/Documentation_for_Projects/run evaluation.md`
+  - `KevinSideWork/Documentation_for_Projects/runEvaluation2.md` (includes Trace Addendum)
 
 ---
 

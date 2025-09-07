@@ -6,6 +6,8 @@ Based on the ADK callback documentation, this implements a simple function-based
 
 import logging
 import re
+import os
+import glob
 from typing import Optional, Any
 try:
     from google.cloud import storage  # type: ignore
@@ -79,6 +81,14 @@ async def before_tool_callback(tool: BaseTool, args: dict[str, Any], tool_contex
     try:
         # Only handle known tools that accept image_uri
         tool_name = getattr(tool, 'name', '') or ''
+
+        # 0) chirp_tts: ensure we have a concrete local output path by default
+        # This avoids passing pseudo references (e.g., artifact:...) into downstream ffmpeg combine.
+        if 'text' in args and 'input_audio_uri' not in args and 'input_video_uri' not in args:
+            # Heuristic for chirp_tts-like tools: they accept 'text' and produce audio
+            if not args.get('output_directory'):
+                args['output_directory'] = '.'
+                logger.info("Set default output_directory='.' for TTS to ensure a concrete local audio file is produced")
         if 'image_uri' in args and isinstance(args['image_uri'], str) and args['image_uri'].startswith('artifact:'):
             artifact_ref = args['image_uri']
             artifact_filename = artifact_ref.split(':', 1)[1]
@@ -217,6 +227,76 @@ async def before_tool_callback(tool: BaseTool, args: dict[str, Any], tool_contex
                             logger.info(f"Replaced invalid gs:// image with latest artifact URI: {gcs_uri_latest}")
             except Exception as ex:
                 logger.warning(f"Validation of gs:// image or artifact replacement failed: {ex}")
+
+        # 1) ffmpeg_combine_audio_and_video preflight: resolve artifact placeholders and validate inputs
+        if 'input_audio_uri' in args and 'input_video_uri' in args:
+            try:
+                # Resolve 'artifact:' audio placeholders by picking the latest local chirp output
+                audio_uri = args.get('input_audio_uri')
+                if isinstance(audio_uri, str) and audio_uri.startswith('artifact:'):
+                    candidates = sorted(
+                        glob.glob(os.path.join('.', 'chirp_audio-*.wav')),
+                        key=lambda p: os.path.getmtime(p),
+                        reverse=True,
+                    )
+                    if candidates:
+                        args['input_audio_uri'] = candidates[0]
+                        logger.info(f"Resolved artifact audio placeholder -> '{candidates[0]}'")
+                    else:
+                        logger.warning("No local chirp_audio-*.wav found to resolve artifact audio placeholder")
+
+                # Validate local audio path if not gs://
+                audio_uri = args.get('input_audio_uri')
+                if isinstance(audio_uri, str) and not audio_uri.startswith('gs://'):
+                    if not os.path.isfile(audio_uri):
+                        logger.warning(f"Local input audio does not exist: {audio_uri}")
+
+                # Validate local video path if not gs://
+                video_uri = args.get('input_video_uri')
+                if isinstance(video_uri, str) and not video_uri.startswith('gs://'):
+                    if not os.path.isfile(video_uri):
+                        logger.warning(f"Local input video does not exist: {video_uri}")
+
+                # Validate GCS object existence for gs:// inputs
+                def _gcs_exists(guri: str) -> bool:
+                    try:
+                        if storage is None:
+                            return True  # cannot validate without storage; allow tool to proceed
+                        without_scheme = guri[len('gs://'):]
+                        parts = without_scheme.split('/', 1)
+                        if len(parts) != 2 or not parts[0] or not parts[1]:
+                            return False
+                        client = storage.Client()
+                        blob = client.bucket(parts[0]).blob(parts[1])
+                        return blob.exists()
+                    except Exception as ex:
+                        logger.warning(f"GCS existence check failed for {guri}: {ex}")
+                        return True
+
+                if isinstance(audio_uri, str) and audio_uri.startswith('gs://') and not _gcs_exists(audio_uri):
+                    # Try fallback to latest local chirp audio file
+                    candidates = sorted(
+                        glob.glob(os.path.join('.', 'chirp_audio-*.wav')),
+                        key=lambda p: os.path.getmtime(p),
+                        reverse=True,
+                    )
+                    if candidates:
+                        args['input_audio_uri'] = candidates[0]
+                        logger.info(f"Audio gs:// missing; falling back to local '{candidates[0]}'")
+                    else:
+                        logger.warning(f"Audio gs:// object does not exist and no local fallback found: {audio_uri}")
+
+                if isinstance(video_uri, str) and video_uri.startswith('gs://') and not _gcs_exists(video_uri):
+                    logger.warning(f"Video gs:// object does not exist: {video_uri}")
+
+                # Ensure output will be uploaded to a bucket if supported by downstream tool
+                if not args.get('output_gcs_bucket'):
+                    bucket = os.getenv('GENMEDIA_BUCKET')
+                    if bucket:
+                        args['output_gcs_bucket'] = bucket
+                        logger.info(f"Set output_gcs_bucket to GENMEDIA_BUCKET='{bucket}' for combine output")
+            except Exception as pf_ex:
+                logger.warning(f"ffmpeg combine preflight adjustments failed: {pf_ex}")
 
         # Returning None lets the tool proceed
         return None
