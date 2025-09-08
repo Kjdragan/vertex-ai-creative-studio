@@ -24,6 +24,7 @@ from config.default import Default
 from config.imagen_models import IMAGEN_MODELS, get_imagen_model_config
 from models.gemini import generate_compliment, rewrite_prompt_with_gemini
 from models.image_models import generate_images_from_prompt
+from common.storage import generate_signed_urls_for_gcs_uris
 from state.state import AppState
 from state.imagen_state import PageState
 from components.styles import _BOX_STYLE # Import the style
@@ -155,6 +156,7 @@ def on_click_generate_images(e: me.ClickEvent):
 
     state.is_loading = True
     state.image_output = []  # Reset image output
+    state.image_display_urls = []
     state.image_commentary = ""
     state.error_message = ""  # Clear previous errors
     yield  # UI: Spinner ON, outputs cleared
@@ -170,7 +172,17 @@ def on_click_generate_images(e: me.ClickEvent):
             prompt_modifiers_segment="",  # This is now handled by the prompt itself
             aspect_ratio=state.image_aspect_ratio,
         )
+        # Keep original gs:// URIs for metadata and critique
         state.image_output = new_image_uris
+
+        # Create signed URLs for browser display
+        try:
+            state.image_display_urls = generate_signed_urls_for_gcs_uris(new_image_uris, minutes=15)
+        except Exception as sign_err:
+            print(f"Warning: failed to generate signed URLs, falling back to mtls URLs: {sign_err}")
+            state.image_display_urls = [
+                uri.replace("gs://", "https://storage.mtls.cloud.google.com/") for uri in new_image_uris
+            ]
         state.is_loading = False
 
         if state.image_output:
@@ -304,6 +316,7 @@ def on_click_clear_images(e: me.ClickEvent):
     state.image_prompt_input = ""
     state.image_prompt_placeholder = ""  # Clear placeholder as well
     state.image_output = []  # Use assignment for list reset
+    state.image_display_urls = []
     state.image_commentary = ""
     state.image_negative_prompt_input = ""
     state.image_textarea_key += 1

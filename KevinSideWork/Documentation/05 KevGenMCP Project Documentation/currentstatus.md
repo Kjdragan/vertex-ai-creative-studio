@@ -16,6 +16,12 @@ This document serves as the **source of truth** for the current state of the Goo
 
 **Key Achievement:** Successfully resolved all critical timeout and environment variable issues. **Latest:** Implemented comprehensive Arize tracing with OpenInference semantic attributes and integrated ADK native session management. System is now fully operational with enhanced observability and proper session lifecycle management.
 
+### Update — 2025-09-08: GenMedia Creative Studio (experiments/veo-app)
+- Investigated missing image display on the Imagen page; root cause was browser attempts to fetch non-public GCS paths (gs:// → mtls) without signed access.
+- Implemented server-side signed URL generation for generated images and updated the page state to render display-ready URLs while preserving gs:// URIs for metadata and critique.
+- Verified end-to-end flow: image generation (Imagen 4.0), signed URL rendering, Gemini critique, and Firestore persistence. See repository root `run_evaluation.md` for details.
+- Observed duplicated init logs at startup due to uvicorn reload; expected and harmless in dev.
+
 ## System Architecture Overview
 
 ### Core Components

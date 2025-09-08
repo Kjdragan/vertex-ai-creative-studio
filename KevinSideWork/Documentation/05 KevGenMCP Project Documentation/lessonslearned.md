@@ -18,6 +18,25 @@ This document serves as a technical reference and source of truth for coding les
 
 ---
 
+## GenMedia Creative Studio (veo-app) — 2025-09-08
+
+### ✅ Lesson: Signed URLs are required for browser rendering of GCS objects
+Problem: The UI attempted to display `gs://` outputs by swapping to `https://storage.mtls.cloud.google.com/`, which failed in browsers due to authentication/CORS.
+
+Solution: Generate V4 signed URLs server-side and render those. Preserve canonical `gs://` URIs for metadata and downstream processing (e.g., Gemini critique), but use display-ready HTTPS URLs for `<img>` sources.
+
+### ✅ Lesson: Separate “source URI” from “display URL” in state
+Maintain `gs://` in state for data lineage and logging. Add a parallel “display URLs” list derived at render time (signed or public). This keeps analytics clean while ensuring reliable UX.
+
+### ✅ Lesson: Expect duplicate init logs under dev reload
+Uvicorn’s reloader executes module-level initialization twice (parent + worker). Duplicate “Initiating Gemini client …” and Firebase init logs are expected and harmless in development.
+
+### ✅ Lesson: Clarify timing metrics
+If a single “generation_time” metric spans both image generation and critique, interpret it as total pipeline time. Consider separate metrics when needed.
+
+### ✅ Lesson: CSP domains must cover storage endpoints
+Ensure `img-src` and `media-src` include `https://storage.googleapis.com` (and any alternates) to allow signed URL fetches.
+
 ## Environment Variable Management
 
 ### ✅ **Lesson: Pass All Environment Variables to All MCP Servers**

@@ -16,9 +16,13 @@ import base64
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from functools import lru_cache
+import os
+import datetime as dt
 
 from google.cloud import aiplatform
 from google.cloud import storage
+import google.auth
+from google.auth import impersonated_credentials
 import vertexai
 
 from config.default import Default
@@ -120,3 +124,52 @@ def list_files_in_bucket(bucket_name, prefix=None):
         file_names.append(blob.name)
 
     return file_names
+
+
+def generate_signed_url_for_gcs_uri(gcs_uri: str, minutes: int = 15) -> str:
+    """Generate a V4 signed URL for the provided GCS URI.
+
+    Attempts to use IAM-based signing when running in Cloud Run (K_SERVICE set),
+    otherwise uses the current ADC credentials. Requires the caller to have
+    `roles/iam.serviceAccountTokenCreator` on the service account specified via
+    SERVICE_ACCOUNT_EMAIL when signing via IAM.
+    """
+    try:
+        storage_client = storage.Client(project=cfg.PROJECT_ID)
+
+        # In Cloud Run, prefer impersonation of the provided service account
+        if os.environ.get("K_SERVICE"):
+            source_credentials, _ = google.auth.default()
+            storage_client = storage.Client(
+                credentials=impersonated_credentials.Credentials(
+                    source_credentials=source_credentials,
+                    target_principal=os.environ.get("SERVICE_ACCOUNT_EMAIL"),
+                    target_scopes=[
+                        "https://www.googleapis.com/auth/devstorage.read_only",
+                    ],
+                )
+            )
+
+        bucket_name, blob_name = gcs_uri.replace("gs://", "").split("/", 1)
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+
+        signed_url = blob.generate_signed_url(
+            version="v4",
+            expiration=dt.timedelta(minutes=minutes),
+            method="GET",
+            # When running locally with user ADC, this triggers IAM signBlob using
+            # the SERVICE_ACCOUNT_EMAIL if the user has Token Creator on it.
+            service_account_email=os.environ.get("SERVICE_ACCOUNT_EMAIL"),
+        )
+        return signed_url
+    except Exception as e:
+        # Provide a best-effort fallback and detailed log for local dev
+        print(f"generate_signed_url_for_gcs_uri: failed to sign {gcs_uri}: {e}")
+        # Fallback to mtls URL (may still fail in browser if not public)
+        return gcs_uri.replace("gs://", "https://storage.mtls.cloud.google.com/")
+
+
+def generate_signed_urls_for_gcs_uris(gcs_uris: list[str], minutes: int = 15) -> list[str]:
+    """Batch helper to generate signed URLs for a list of GCS URIs."""
+    return [generate_signed_url_for_gcs_uri(u, minutes) for u in gcs_uris]

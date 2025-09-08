@@ -43,7 +43,7 @@ def image_output():
                     style=me.Style(margin=me.Margin(top=10)),
                 )
 
-        elif state.image_output:
+        elif state.image_display_urls or state.image_output:
             with me.box(
                 style=me.Style(
                     display="flex",
@@ -59,16 +59,12 @@ def image_output():
                         justify_content="center",
                     )
                 ):
-                    for img_uri in state.image_output:
-                        if img_uri:
-                            final_img_src = img_uri
-                            if img_uri.startswith("gs://"):
-                                final_img_src = img_uri.replace(
-                                    "gs://", "https://storage.mtls.cloud.google.com/"
-                                )
-
+                    # Prefer display URLs if available; otherwise fall back to raw URIs
+                    display_list = state.image_display_urls or state.image_output
+                    for img_src in display_list:
+                        if img_src:
                             me.image(
-                                src=final_img_src,
+                                src=img_src,
                                 style=me.Style(
                                     width="300px",
                                     height="300px",
