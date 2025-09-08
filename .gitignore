@@ -12,3 +12,6 @@ recaps/
 .aider*
 
 .commit.txt
+
+.gemini/
+gha-creds-*.json
